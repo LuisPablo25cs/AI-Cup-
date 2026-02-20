@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  ai-tool:
+    build: .
+    container_name: industrial_vision_tester
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - .:/app
+      # Mapeamos tu carpeta de datasets para que el script las lea fácil
+      - ./Datasets:/app/datasets
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
