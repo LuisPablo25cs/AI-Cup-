@@ -1,33 +1,37 @@
 import os
-from glob import glob
-import cv2
 import torch
+import cv2
+import numpy as np
+from glob import glob
+
+# Asegurarse de cargar las librerías limpias
 from groundingdino.util.inference import load_model, load_image, predict, annotate
 
-# 1. Configuración de rutas
-CONFIG_PATH = "groundingdino/config/GroundingDINO_SwinT_OGC.py"
-WEIGHTS_PATH = "weights/groundingdino_swint_ogc.pth"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Desactivar gradientes para inferencia industrial (ahorra mucha memoria)
+torch.set_grad_enabled(False)
 
-# Asegúrate de que esta ruta coincida EXACTAMENTE con mayúsculas y espacios
-# con cómo se llama tu carpeta en el sistema de archivos.
-DATASET_PATH = "datasets/Demo (Platanos)" 
+print(f"DEBUG: Versión Numpy {np.__version__}")
+
+# --- RUTAS ABSOLUTAS EXACTAS ---
+CONFIG_PATH = "/app/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
+WEIGHTS_PATH = "/app/weights/groundingdino_swint_ogc.pth"
+DATASET_PATH = "/app/datasets/demo (platanos)" 
+# -------------------------------
+
 images = glob(os.path.join(DATASET_PATH, "*.jpg"))
-
 print(f"Encontradas {len(images)} imágenes para procesar.")
 
-# 2. Cargar el modelo
+if len(images) == 0:
+    print("¡ALERTA! No se encontraron imágenes. Verifica el mapeo de carpetas en docker-compose.")
+    exit()
+
+print("Cargando modelo...")
 model = load_model(CONFIG_PATH, WEIGHTS_PATH)
 
 def auto_label_piece(image_path, text_prompt):
-    """
-    Detecta piezas usando lenguaje natural y devuelve coordenadas.
-    """
     print(f"Procesando: {image_path}...")
     image_source, image = load_image(image_path)
 
-    # box_threshold: sensibilidad de detección (bájalo si no detecta, súbelo si hay falsos positivos)
-    # text_threshold: relevancia del texto
     boxes, logits, phrases = predict(
         model=model,
         image=image,
@@ -36,26 +40,41 @@ def auto_label_piece(image_path, text_prompt):
         text_threshold=0.25
     )
 
-    # Crear imagen anotada
     annotated_frame = annotate(image_source=image_source, boxes=boxes, logits=logits, phrases=phrases)
     
-    # Extraer el nombre original del archivo (ej. "01.jpg") para no sobrescribir
     base_name = os.path.basename(image_path)
-    output_path = f"resultado_{base_name}"
+    # Guardar en la misma carpeta para que lo veas en tu Windows al instante
+    output_path = os.path.join(DATASET_PATH, f"resultado_{base_name}")
     
     cv2.imwrite(output_path, annotated_frame)
     print(f"Guardado como: {output_path}")
     
     return boxes, phrases
-
-# 3. Bucle para probar TODAS las imágenes en la carpeta
-# El prompt sugerido para Grounding DINO es el nombre del objeto en inglés seguido de un punto.
-
-#! Esta parte debe venir en la request. 
+def save_yolo_labels(boxes, image_path, class_id=0):
+    """
+    Toma las cajas de DINO y genera un archivo .txt en formato YOLO.
+    """
+    # Extraer el nombre base sin la extensión (ej. "01.jpg" -> "01")
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    
+    # Crear la ruta del archivo .txt en la misma carpeta que la imagen
+    txt_path = os.path.join(DATASET_PATH, f"{base_name}.txt")
+    
+    with open(txt_path, 'w') as f:
+        for box in boxes:
+            # DINO devuelve tensores, los pasamos a floats estándar
+            cx, cy, w, h = box.tolist()
+            # Escribir la línea: <class_id> <cx> <cy> <w> <h>
+            f.write(f"{class_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
+            
+    print(f"Etiquetas YOLO guardadas en: {txt_path}")
+# ¡El punto final en el prompt es vital para el modelo de lenguaje!
 prompt_ingles = "banana ." 
 
 for img_path in images:
-    boxes, labels = auto_label_piece(img_path, prompt_ingles)
-    
-    # Aquí es donde luego añadiremos el código para generar el archivo .txt de YOLO
-    print(f"Cajas encontradas en la imagen: {len(boxes)}\n")
+    # Evitar procesar imágenes que ya son resultados
+    if "resultado_" not in img_path:
+        boxes, labels = auto_label_piece(img_path, prompt_ingles)
+        print(f"Cajas encontradas: {len(boxes)}\n")
+        if len(boxes) > 0:
+            save_yolo_labels(boxes, img_path, class_id=0)

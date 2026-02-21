@@ -1,36 +1,43 @@
-# Imagen base con CUDA 12.1
 FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
 
+# Variables de entorno para evitar prompts y forzar CUDA
 ENV DEBIAN_FRONTEND=noninteractive
+ENV FORCE_CUDA="1"
+ENV TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0"
 
+# Instalar dependencias del sistema (C++, Git, OpenCV)
 RUN apt-get update && apt-get install -y \
     git build-essential libgl1-mesa-glx libglib2.0-0 wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Instalación de librerías base
+# 1. Herramientas base y forzar numpy 1.x
+RUN pip install --no-cache-dir wheel "numpy<2.0.0"
+
+# 2. Librerías de visión y utilidades
 RUN pip install --no-cache-dir \
     opencv-python matplotlib onnxruntime-gpu \
-    fastapi uvicorn python-multipart supervision
+    fastapi uvicorn python-multipart supervision \
+    "filelock<=3.12.4" "transformers<=4.38.2"
 
-# --- INSTALACIÓN GROUNDING DINO ---
-RUN git clone https://github.com/IDEA-Research/GroundingDINO.git .
-RUN pip install -r requirements.txt
-RUN pip install -e .
+# 3. Clonar directamente en la ruta correcta (Sin el punto extra y respetando mayúsculas)
+RUN git clone https://github.com/IDEA-Research/GroundingDINO.git /app/GroundingDINO
+WORKDIR /app/GroundingDINO
+RUN pip install --no-cache-dir --no-build-isolation -e .
 
-# --- INSTALACIÓN SAM (Segment Anything) ---
+# 4. Instalar SAM
 RUN pip install git+https://github.com/facebookresearch/segment-anything.git
 
-# Crear carpetas para el flujo de trabajo
-RUN mkdir -p weights datasets outputs
-
-# Descarga de pesos para ambos modelos
+# 5. Volver a la raíz y preparar carpetas (Respetando la D mayúscula de Datasets)
+WORKDIR /app
+RUN mkdir -p weights Datasets outputs
 RUN wget -q https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth -P weights/ && \
     wget -q https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth -P weights/
 
-# COPIAR EL PROYECTO (Para producción)
-# Nota: Durante el desarrollo usamos volúmenes, pero esto asegura que el código esté dentro
-COPY . /app
+# Copiar tu script al contenedor
+RUN pip install "numpy<2.0.0" --force-reinstall
+COPY app.py /app/app.py
 
+# Comando por defecto al iniciar
 CMD ["python", "app.py"]

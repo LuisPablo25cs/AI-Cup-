@@ -1,15 +1,14 @@
-version: '3.8'
 services:
   ai-tool:
     build: .
     container_name: industrial_vision_tester
-    runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_HOME=/usr/local/cuda
     volumes:
-      - .:/app
-      # Mapeamos tu carpeta de datasets para que el script las lea fácil
-      - ./Datasets:/app/datasets
+      # Sincroniza tu código y tus imágenes en tiempo real
+      - ./app.py:/app/app.py
+      - ./datasets:/app/datasets
     deploy:
       resources:
         reservations:
