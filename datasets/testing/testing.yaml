@@ -4,4 +4,12 @@ val: val/images
 test: test/images
 
 names: 
-  0: banana
+  0: PiezaRosaMorado
+  1: F43
+  2: PiezaVerdeRosa
+  3: PiezaBlancoMorado
+  4: Cables
+  5: PiezaAzul
+  6: AMP2413
+  7: Aritos
+  8: 0003x_

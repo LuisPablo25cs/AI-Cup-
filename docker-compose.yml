@@ -6,7 +6,6 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_HOME=/usr/local/cuda
     volumes:
-      # Sincroniza tu código y tus imágenes en tiempo real
       - ./dino.py:/app/dino.py
       - ./datasets:/app/datasets
     deploy:
