@@ -1,0 +1,4 @@
+[core]
+    remote = myremote
+['remote "myremote"']
+    url = C:\Users\luisp\OneDrive\Documentos\Carrera\AI-Cup\Proyecto\datasets
