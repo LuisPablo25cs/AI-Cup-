@@ -1,7 +1,37 @@
-services:
+services:  
+rabbitmq:
+  container_name: rabbitmq
+  image: 'rabbitmq:3-management'
+  ports:
+    - "5672:5672"
+    - "15672:15672"
+
+redis:
+  container_name: redis
+  image: 'redis:alpine'
+  ports:
+  - "6379:6379"
+  command: ["redis-server", "--save", "", "--appendonly", "no"]
+  volumes:
+    - redis-data:/data
+
+blender-tool:
+  container_name: auto-photo-taker-3000
+  image: linuxserver/blender:latest
+  ports:
+  - "3000:3000"
+  environment:
+  - PUID=1000
+  - PGID=1000
+  - TZ=America/Hermosillo
+  volumes:
+  - ./blender_config:/config
+  - ./datasets:/app/outputs_blender 
+  restart: unless-stopped
+
   ai-tool:
     build:
-      context: ./anotacion        # ← apunta a la subcarpeta
+      context: ./anotacion        
       dockerfile: Dockerfile
     container_name: industrial_vision_tester
     environment:
@@ -24,14 +54,14 @@ services:
 
   backend_server:
     build:
-      context: ./backend           # ← apunta a la subcarpeta
+      context: ./backend           
       dockerfile: Dockerfile
     volumes:
       - ./backend:/app
     ports:
       - "8000:8000"
     env_file:
-      - .env             # ← o déjalo en la raíz si prefieres
+      - .env             
     command: sleep infinity
     depends_on:
       db:
@@ -63,3 +93,4 @@ networks:
 
 volumes:
   postgres_data:
+  redis-data:
