@@ -1,10 +1,46 @@
 services:
+  rabbitmq:
+    container_name: rabbitmq
+    image: 'rabbitmq:3-management'
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    container_name: redis
+    image: 'redis:alpine'
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+
+  blender-tool:
+    container_name: auto-photo-taker-3000
+    image: linuxserver/blender:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Hermosillo
+    volumes:
+      - ./blender_config:/config
+      - ./datasets:/app/outputs_blender # Asegúrate que coincida con la ruta de salida de tus scripts
+    restart: unless-stopped
+
   ai-tool:
     build: .
-    container_name: industrial_vision_tester
+    container_name: autolabel
+    depends_on:
+      - rabbitmq
+      - redis
+      - blender-tool
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_HOME=/usr/local/cuda
+      - RABBITMQ_HOST=rabbitmq
+      - REDIS_HOST=redis
     volumes:
       - ./dino.py:/app/dino.py
       - ./datasets:/app/datasets
@@ -17,3 +53,6 @@ services:
               capabilities: [gpu]
     stdin_open: true
     tty: true
+
+volumes:
+  redis-data:

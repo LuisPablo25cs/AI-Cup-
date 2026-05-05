@@ -17,11 +17,18 @@ RUN pip install --no-cache-dir wheel "numpy<2.0.0"
 
 # 2. Librerias 
 RUN pip install --no-cache-dir \
-    opencv-python matplotlib onnxruntime-gpu \
-    fastapi uvicorn python-multipart supervision \ 
-    "filelock<=3.12.4" "transformers<=4.38.2" \
-    commet-ml
-
+    opencv-python-headless \
+    matplotlib \
+    onnxruntime-gpu \
+    fastapi \
+    uvicorn \
+    python-multipart \
+    supervision \
+    "filelock<=3.12.4" \
+    "transformers<=4.38.2" \
+    pika \
+    redis \
+    comet-ml
 
 # 3. Clonar directamente en la ruta correcta 
 RUN git clone https://github.com/IDEA-Research/GroundingDINO.git /app/GroundingDINO
