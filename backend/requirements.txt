@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+sqlmodel
+python-dotenv
+asyncpg
+boto3
+python-multipart

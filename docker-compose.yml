@@ -1,13 +1,15 @@
 services:
   ai-tool:
-    build: .
+    build:
+      context: ./anotacion        # ← apunta a la subcarpeta
+      dockerfile: Dockerfile
     container_name: industrial_vision_tester
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_HOME=/usr/local/cuda
     volumes:
-      - ./dino.py:/app/dino.py
-      - ./datasets:/app/datasets
+      - ./anotacion/dino.py:/app/dino.py
+      - ./anotacion/datasets:/app/datasets
     deploy:
       resources:
         reservations:
@@ -17,3 +19,47 @@ services:
               capabilities: [gpu]
     stdin_open: true
     tty: true
+    networks:
+      - app-network
+
+  backend_server:
+    build:
+      context: ./backend           # ← apunta a la subcarpeta
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env             # ← o déjalo en la raíz si prefieres
+    command: sleep infinity
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: kitting_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d kitting_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

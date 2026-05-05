@@ -1,0 +1,15 @@
+{
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "db",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "kitting_db",
+            "username": "admin",
+            "database": "kitting_db",
+            "password": "admin"
+        }
+    ]
+}
