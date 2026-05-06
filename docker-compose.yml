@@ -1,34 +1,37 @@
 services:  
-rabbitmq:
-  container_name: rabbitmq
-  image: 'rabbitmq:3-management'
-  ports:
-    - "5672:5672"
-    - "15672:15672"
+  rabbitmq:
+    container_name: rabbitmq
+    image: 'rabbitmq:3-management'
+    ports:
+      - "5672:5672"
+      - "15672:15672"
 
-redis:
-  container_name: redis
-  image: 'redis:alpine'
-  ports:
-  - "6379:6379"
-  command: ["redis-server", "--save", "", "--appendonly", "no"]
-  volumes:
-    - redis-data:/data
+  redis:
+    container_name: redis
+    image: 'redis:alpine'
+    ports:
+    - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
 
-blender-tool:
-  container_name: auto-photo-taker-3000
-  image: linuxserver/blender:latest
-  ports:
-  - "3000:3000"
-  environment:
-  - PUID=1000
-  - PGID=1000
-  - TZ=America/Hermosillo
-  volumes:
-  - ./blender_config:/config
-  - ./datasets:/app/outputs_blender 
-  restart: unless-stopped
-
+  blender-tool:
+    container_name: auto-photo-taker-3000
+    build: 
+      context: ./blender
+      dockerfile: Dockerfile
+    environment:
+      - STAGING_PATH=/staging
+      - TZ=America/Hermosillo
+    volumes:
+      - ./blender/scenes:/scenes       
+      - ./blender/staging:/staging      
+    restart: unless-stopped
+    depends_on: 
+      - rabbitmq
+      - redis
+    networks:
+      - app-network
   ai-tool:
     build:
       context: ./anotacion        
@@ -94,3 +97,4 @@ networks:
 volumes:
   postgres_data:
   redis-data:
+  temp-data:
