@@ -5,7 +5,13 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-
+    healthcheck: 
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: 
+      - app-network
   redis:
     container_name: redis
     image: 'redis:alpine'
@@ -14,7 +20,8 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     volumes:
       - redis-data:/data
-
+    networks: 
+      - app-network
   blender-tool:
     container_name: auto-photo-taker-3000
     build: 
@@ -28,21 +35,31 @@ services:
       - ./blender/staging:/staging      
     restart: unless-stopped
     depends_on: 
-      - rabbitmq
-      - redis
+      rabbitmq: 
+        condition: service_healthy
+      redis: 
+        condition: service_started
     networks:
       - app-network
+
   ai-tool:
     build:
-      context: ./anotacion        
+      context: ./anotation        
       dockerfile: Dockerfile
     container_name: industrial_vision_tester
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_HOME=/usr/local/cuda
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis: 
+        condition: service_started
     volumes:
-      - ./anotacion/dino.py:/app/dino.py
-      - ./anotacion/datasets:/app/datasets
+      - ./anotation/dinoWorker.py:/app/dinoWorker.py
+      - ./anotation/datasets:/app/datasets
     deploy:
       resources:
         reservations:

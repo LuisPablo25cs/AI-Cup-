@@ -4,19 +4,37 @@ import os
 import subprocess
 import json
 from pathlib import Path
+import time
+
+def connect_rabbitmq(retries=5, delay=5):
+    for attempt in range(retries):
+        try:
+            conn = pika.BlockingConnection(
+                pika.ConnectionParameters(host="rabbitmq")
+            )
+            print("Connected to RabbitMQ")
+            return conn
+        except Exception as e:
+            print(f"RabbitMQ not ready ({attempt+1}/{retries}): {e}")
+            time.sleep(delay)
+    raise Exception("Could not connect to RabbitMQ after retries")
+
+
+
+#Connection with rabbitmq
+conn = connect_rabbitmq()
 
 STAGING = Path(os.environ["STAGING_PATH"])
 STAGING.mkdir(exist_ok=True)
 
-#Connection with rabbitmq
-conn = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
+
 #Start TCP conn with rabbitmq
 channel = conn.channel()
 #Declare queues 
 channel.queue_declare(queue="blender-queue", durable=True)
 channel.queue_declare(queue="grounding-sam-queue", durable=True)
 
-r = redis.Redis(host=redis, port=6379, db=0)
+r = redis.Redis(host="redis", port=6379, db=0)
 
 def autoPhotoTaker3000(ch, method, properties, body):
     task = json.loads(body)
@@ -40,12 +58,13 @@ def autoPhotoTaker3000(ch, method, properties, body):
             "frame": i
         }))
 
-        ch.basic_public(
+        ch.basic_publish(
             exchange="", 
             routing_key="grounding-sam-queue",
             body=json.dumps({"taskId" : taskId, "frame":i, "path": str(out_path)})
         )
+        ch.basic_ack(delivery_tag=method.delivery_tag)
 
 channel.basic_qos(prefetch_count=1)
-channel.basic_consume(queue="grounding-sam-queue", on_message_callback=autoPhotoTaker3000)
+channel.basic_consume(queue="blender-queue", on_message_callback=autoPhotoTaker3000)
 channel.start_consuming()

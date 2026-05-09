@@ -91,7 +91,7 @@ def process_folder(folder_name):
     print(f"\n--- Processing {folder_name.upper()} ({len(images)} images) ---")
 
     for img_path in images:
-        if "seg_visual_" in img_path:   # skip previews
+        if "seg_visual_" in img_path:   
             continue
 
         class_name = get_class_from_filename(img_path)
@@ -108,7 +108,7 @@ def process_folder(folder_name):
         boxes, logits, phrases = predict(model, image, prompt, 0.3, 0.25)
 
         if len(boxes) == 0:
-            print(f"  ⚠️  No detections for {os.path.basename(img_path)}")
+            print(f"No detections for {os.path.basename(img_path)}")
             continue
 
         sam_predictor.set_image(image_source)

@@ -10,6 +10,7 @@ import uuid
 import os
 from PIL import Image
 from ultralytics import YOLO
+import json
 
 #Connection with rabbitmq
 conn = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
@@ -19,7 +20,7 @@ channel = conn.channel()
 channel.queue_declare(queue="blender-queue", durable=True)
 channel.queue_declare(queue="grounding-sam-queue", durable=True)
 
-r = redis.Redis(host=redis, port=6379, db=0)
+r = redis.Redis(host="redis", port=6379, db=0)
 #toDo
 fileTypes = {
 
@@ -46,8 +47,8 @@ def health():
     return {"message": "healthy"}
 
 
-@app.get("/publishNewPiece")
-async def publishNewPiece(file: UploadFile): 
+@app.post("/publishNewPiece")
+async def publishNewPiece(file: UploadFile, prompt: str): 
     if file.content_type not in fileTypes: 
         raise HTTPException(
             status_code=400,
@@ -60,13 +61,22 @@ async def publishNewPiece(file: UploadFile):
         )
     taskID = str(uuid.uuid4())
     try:
-        r.setex(f"file:{taskID}, {file.filename}")
+        r.setex(f"file:{taskID}, 1800, {file.filename}")
         path = f"/app/data{file.filename}"
         with open(path, "wb") as buffer: 
             buffer.write(await file.read())
+        r.setex(f"prompt:{taskID}", 1800, prompt)
         r.setex(f"path:{taskID}", 1800, path)
         r.setex(f"status:{taskID}", 1800, "QUEUED")
-        channel.basic_publish(exchange='', routing_key="blender-queue", body=taskID)
+        channel.basic_publish(
+            exchange='', 
+            routing_key="blender-queue", 
+            body=json.dumps({
+                "task_id" : taskID,
+                "scene_file" : path, 
+                "prompt" : prompt, 
+                "n_images" : 8
+            }))
     except Exception as e:
         return {
             "task_id": taskID,
