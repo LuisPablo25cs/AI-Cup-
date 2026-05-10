@@ -1,2 +1,6 @@
 *.env
 blender_config
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
