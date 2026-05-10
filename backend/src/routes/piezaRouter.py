@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
-from backend.src.db import get_session
-from backend.src.models.pieza import Pieza
+from src.db import get_session
+from src.models.pieza import Pieza
 from uuid import UUID
 from datetime import datetime, timezone
 from pydantic import BaseModel

@@ -1,8 +1,8 @@
 from fastapi import FastAPI, UploadFile, HTTPException
 from contextlib import asynccontextmanager
-from backend.src.db import test_connection, init_db
-from backend.src.routes.imagenRouter import router as imagenRouter
-from backend.src.routes.piezaRouter import router as piezaRouter
+from src.db import test_connection, init_db
+from src.routes.imagenRouter import router as imagenRouter
+from src.routes.piezaRouter import router as piezaRouter
 import pika
 import io
 import redis 
@@ -21,10 +21,11 @@ channel.queue_declare(queue="blender-queue", durable=True)
 channel.queue_declare(queue="grounding-sam-queue", durable=True)
 
 r = redis.Redis(host="redis", port=6379, db=0)
-#toDo
-fileTypes = {
 
-}
+fileTypes = [
+    "model/gltf-binary",      # .glb MIME type
+    "application/octet-stream" # fallback some clients send for .glb
+]
 
 PATH_MODELO = "yolov8n-seg.pt"
 def inferir(model, img): 
@@ -61,8 +62,9 @@ async def publishNewPiece(file: UploadFile, prompt: str):
         )
     taskID = str(uuid.uuid4())
     try:
-        r.setex(f"file:{taskID}, 1800, {file.filename}")
-        path = f"/app/data{file.filename}"
+        r.setex(f"class_id:{taskID}", 1800, "0")
+        r.setex(f"file:{taskID}", 1800, {file.filename})
+        path = f"/app/data/{file.filename}"
         with open(path, "wb") as buffer: 
             buffer.write(await file.read())
         r.setex(f"prompt:{taskID}", 1800, prompt)
@@ -83,7 +85,47 @@ async def publishNewPiece(file: UploadFile, prompt: str):
             "status": "QUEUED",
             "message": "File received, validated and queued for processing"}, 202
 
+@app.get("fetchImages/<id>")
+async def fetchImages(taskID): 
+    status = r.get(f"status:{taskID}")
+    if not status: 
+        return {
+            "error" : "task not fouund"
+        }, 404
+    status = status.decode()
+    pending = []
+    for key in r.scan_iter("staging:*"):
+        data = json.loads(r.get(key))
+        if data["status"] == "pending_validation":
+            pending.append(data)
+    return pending
 
+@app.post("/confirm/<id>")
+async def confirm(taskID, imgStatus):
+    status = r.get(f"status:{taskID}") 
+    if not status: 
+        return {
+            "error" : "task not fouund"
+        }, 404
+    total = imgStatus.count()
+    approved = 0
+    for img in imgStatus: 
+        if img.status == "aproved":
+            approved +=1
+            #logic to store
+            print("Aproved")
+        elif img.status == "not_aproved":
+            #logic to delete
+            print("Deleted")
+        else: 
+            print("Inapropiate format")
+    #Transaction logic
+    transaction_status = False
+    return {
+        "task_id" : taskID,
+        "transaction_status" : transaction_status, 
+        "Amount_approved" : f"{approved} / {total}"
+    }
 #Template for inference endpoint 
 
 @app.post("/find-objects")

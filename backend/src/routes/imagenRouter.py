@@ -1,9 +1,9 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
-from backend.src.db import get_session
-from backend.src.models.imagen import Imagen
-from backend.src.models.pieza import Pieza
-from backend.src.services.s3 import upload_imagen
+from src.db import get_session
+from src.models.imagen import Imagen
+from src.models.pieza import Pieza
+from src.services.s3 import upload_imagen
 from uuid import UUID
 
 router = APIRouter(prefix="/imagenes", tags=["Imagenes"])
