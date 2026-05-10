@@ -9,10 +9,28 @@ try:
 except ImportError:  # pragma: no cover — optional at import time in tests
     YOLO = None  # type: ignore[assignment,misc]
 
-# Module-level singleton state
+# Module-level singleton state.
+# Locks are created lazily inside the running event loop to avoid binding to
+# the wrong loop (or no loop at all) when this module is imported before
+# uvicorn starts the event loop. See Python 3.10+ asyncio guidance.
 _models: dict[str, Any] = {}
 _locks: dict[str, asyncio.Lock] = {}
-_registry_lock: asyncio.Lock = asyncio.Lock()
+_registry_lock: asyncio.Lock | None = None
+
+
+def _get_registry_lock() -> asyncio.Lock:
+    """Return the registry lock, creating it lazily inside the running loop.
+
+    Safe to call from a single coroutine at a time without external sync:
+    `asyncio.Lock()` construction is synchronous and CPython's GIL guarantees
+    that the module-global assignment is atomic. Two coroutines on the same
+    event loop cannot execute this function concurrently because there is no
+    `await` between the read and the assignment.
+    """
+    global _registry_lock
+    if _registry_lock is None:
+        _registry_lock = asyncio.Lock()
+    return _registry_lock
 
 
 class ModelLoadError(Exception):
@@ -46,7 +64,7 @@ async def get_model(kit_id: str, kit_cfg: KitConfig) -> Any:
         return _models[kit_id]
 
     # Slow path: get or create per-kit lock (guards lock-map mutation only)
-    async with _registry_lock:
+    async with _get_registry_lock():
         if kit_id not in _locks:
             _locks[kit_id] = asyncio.Lock()
         kit_lock = _locks[kit_id]
@@ -57,7 +75,7 @@ async def get_model(kit_id: str, kit_cfg: KitConfig) -> Any:
         if kit_id in _models:
             return _models[kit_id]
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             model = await loop.run_in_executor(None, YOLO, kit_cfg.model_path)
         except Exception as exc:
@@ -78,7 +96,7 @@ async def predict(model: Any, image: Any, conf: float) -> Any:
     Returns:
         The raw YOLO results list.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
         None, lambda: model.predict(image, conf=conf, verbose=False)
     )
