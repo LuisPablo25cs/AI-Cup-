@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from src.db import test_connection, init_db
 from src.routes.imagenRouter import router as imagenRouter
 from src.routes.piezaRouter import router as piezaRouter
+from src.routes.inspectRouter import router as inspectRouter
+from src.services.kit_config import load_kit_config
 import pika
 import io
 import redis 
@@ -54,6 +56,11 @@ async def lifespan(app: FastAPI):
     print("Server is starting")
     await test_connection()
     await init_db()
+    # Load kit config — raises ValueError on missing/invalid file (REQ-14).
+    # No try/except: let it crash so uvicorn refuses to start.
+    config_path = Path("/app/models_config.json")
+    app.state.kits_config = load_kit_config(config_path)
+    print(f"Loaded kit config from {config_path} ({len(app.state.kits_config.root)} kit(s))")
     yield
     print("Server is closing")
 
@@ -162,3 +169,4 @@ async def find_objects(file: UploadFile = File(...)):
 
 app.include_router(imagenRouter)
 app.include_router(piezaRouter)
+app.include_router(inspectRouter)
