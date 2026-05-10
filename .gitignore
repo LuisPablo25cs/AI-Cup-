@@ -4,3 +4,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# YOLO model weights — place .pt files here manually, never commit them
+backend/models_yolo/
+models_yolo/
+*.pt
