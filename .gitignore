@@ -9,3 +9,10 @@ __pycache__/
 backend/models_yolo/
 models_yolo/
 *.pt
+
+# Graphify codebase analysis output — regenerated locally, not source
+graphify-out/
+backend/graphify-out/
+
+# Broken in-container symlink (only resolves inside Docker)
+backend/app
