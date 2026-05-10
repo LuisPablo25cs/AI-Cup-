@@ -1,0 +1,12 @@
+{
+  "kit_a": {
+    "model_path": "/app/models_yolo/kit_a.pt",
+    "model_version": "1.0.0",
+    "confidence_threshold": 0.5,
+    "expected": {
+      "bolt": 4,
+      "nut": 4,
+      "washer": 8
+    }
+  }
+}
