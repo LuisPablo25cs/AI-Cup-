@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi import FastAPI, UploadFile, HTTPException, File
 from contextlib import asynccontextmanager
 from src.db import test_connection, init_db
 from src.routes.imagenRouter import router as imagenRouter
