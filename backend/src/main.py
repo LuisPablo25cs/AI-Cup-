@@ -10,9 +10,12 @@ import redis
 import uuid
 import os
 from PIL import Image
-#from ultralytics import YOLO
+from ultralytics import YOLO
 import json
 import time
+from pathlib import Path
+
+Path("/app/data").mkdir(exist_ok=True)
 
 def connect_rabbitmq(retries=10, delay=5):
     for attempt in range(retries):
@@ -31,13 +34,7 @@ conn = connect_rabbitmq()
 channel = conn.channel()
 channel.queue_declare(queue="blender-queue", durable=True)
 channel.queue_declare(queue="grounding-sam-queue", durable=True)
-#Connection with rabbitmq
-conn = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
-#Start TCP conn with rabbitmq
-channel = conn.channel()
-#Declare queues 
-channel.queue_declare(queue="blender-queue", durable=True)
-channel.queue_declare(queue="grounding-sam-queue", durable=True)
+
 
 r = redis.Redis(host="redis", port=6379, db=0)
 
@@ -82,7 +79,7 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
     taskID = str(uuid.uuid4())
     try:
         r.setex(f"class_id:{taskID}", 1800, "0")
-        r.setex(f"file:{taskID}", 1800, {file.filename})
+        r.setex(f"file:{taskID}", 1800, file.filename)
         path = f"/app/data/{file.filename}"
         with open(path, "wb") as buffer: 
             buffer.write(await file.read())
@@ -98,11 +95,13 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
                 "prompt" : prompt, 
                 "n_images" : 8
             }))
-    except Exception as e:
         return {
             "task_id": taskID,
             "status": "QUEUED",
-            "message": "File received, validated and queued for processing"}, 202
+            "message": "File received, validated and queued for processing"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/fetchImages/{taskID}")
 async def fetchImages(taskID: str): 
@@ -117,6 +116,13 @@ async def fetchImages(taskID: str):
         data = json.loads(r.get(key))
         if data["status"] == "pending_validation":
             pending.append(data)
+    if len(pending) == 0: 
+        return {
+        
+            "task_id": taskID,
+            "status": status,
+            "message": "File received, validated and queued for processing"
+        }
     return pending
 
 @app.post("/confirm/{taskID}")
