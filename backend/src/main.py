@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from contextlib import asynccontextmanager
 from src.db import test_connection, init_db
 from src.routes.imagenRouter import router as imagenRouter
@@ -9,9 +9,27 @@ import redis
 import uuid
 import os
 from PIL import Image
-from ultralytics import YOLO
+#from ultralytics import YOLO
 import json
+import time
 
+def connect_rabbitmq(retries=10, delay=5):
+    for attempt in range(retries):
+        try:
+            conn = pika.BlockingConnection(
+                pika.ConnectionParameters(host="rabbitmq")
+            )
+            print("Connected to RabbitMQ")
+            return conn
+        except Exception as e:
+            print(f"RabbitMQ not ready ({attempt+1}/{retries}), retrying in {delay}s...")
+            time.sleep(delay)
+    raise Exception("Could not connect to RabbitMQ after retries")
+
+conn = connect_rabbitmq()
+channel = conn.channel()
+channel.queue_declare(queue="blender-queue", durable=True)
+channel.queue_declare(queue="grounding-sam-queue", durable=True)
 #Connection with rabbitmq
 conn = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
 #Start TCP conn with rabbitmq
@@ -27,11 +45,11 @@ fileTypes = [
     "application/octet-stream" # fallback some clients send for .glb
 ]
 
-PATH_MODELO = "yolov8n-seg.pt"
-def inferir(model, img): 
-    model = YOLO(model)
-    resultado = model(img)
-    return resultado
+#PATH_MODELO = "yolov8n-seg.pt"
+#def inferir(model, img): 
+    #model = YOLO(model)
+    #resultado = model(img)
+    #return resultado
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,7 +67,7 @@ def health():
 
 
 @app.post("/publishNewPiece")
-async def publishNewPiece(file: UploadFile, prompt: str): 
+async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)): 
     if file.content_type not in fileTypes: 
         raise HTTPException(
             status_code=400,
@@ -85,8 +103,8 @@ async def publishNewPiece(file: UploadFile, prompt: str):
             "status": "QUEUED",
             "message": "File received, validated and queued for processing"}, 202
 
-@app.get("fetchImages/<id>")
-async def fetchImages(taskID): 
+@app.get("/fetchImages/{taskID}")
+async def fetchImages(taskID: str): 
     status = r.get(f"status:{taskID}")
     if not status: 
         return {
@@ -100,7 +118,7 @@ async def fetchImages(taskID):
             pending.append(data)
     return pending
 
-@app.post("/confirm/<id>")
+@app.post("/confirm/{taskID}")
 async def confirm(taskID, imgStatus):
     status = r.get(f"status:{taskID}") 
     if not status: 
@@ -132,8 +150,8 @@ async def confirm(taskID, imgStatus):
 async def find_objects(file: UploadFile = File(...)): 
     image_bytes = await file.read()
     image = Image.open(io.BytesIO(image_bytes))
-    res = inferir(PATH_MODELO, image)
-    print(res)
+    #res = inferir(PATH_MODELO, image)
+    #print(res)
 
 app.include_router(imagenRouter)
 app.include_router(piezaRouter)
