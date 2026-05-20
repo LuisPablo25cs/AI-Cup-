@@ -12,17 +12,34 @@ s3_client = boto3.client(
 BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
 
-def upload_imagen(file_bytes: bytes, id_pieza: str, content_type: str = "image/jpeg") -> tuple[str, str]:
+def upload_imagen(file_bytes: bytes, id_pieza: str, content_type: str = "image/jpeg", filename_uuid: str | None = None) -> tuple[str, str]:
     """
     Sube imagen a S3 y retorna (bucket, key_s3)
     """
-    key = f"piezas/{id_pieza}/{uuid4()}.jpg"
+    name_uuid = filename_uuid or str(uuid4())
+    key = f"piezas/{id_pieza}/{name_uuid}.jpg"
 
     s3_client.put_object(
         Bucket=BUCKET_NAME,
         Key=key,
         Body=file_bytes,
         ContentType=content_type
+    )
+
+    return BUCKET_NAME, key
+
+
+def upload_label(file_bytes: bytes, id_pieza: str, filename_uuid: str) -> tuple[str, str]:
+    """
+    Sube archivo de etiquetas (.txt) a S3 y retorna (bucket, key_s3_label)
+    """
+    key = f"piezas/{id_pieza}/{filename_uuid}.txt"
+
+    s3_client.put_object(
+        Bucket=BUCKET_NAME,
+        Key=key,
+        Body=file_bytes,
+        ContentType="text/plain"
     )
 
     return BUCKET_NAME, key

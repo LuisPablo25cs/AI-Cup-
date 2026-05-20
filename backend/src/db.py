@@ -4,6 +4,7 @@ from sqlmodel import SQLModel
 import os
 from .models.pieza import Pieza
 from .models.imagen import Imagen
+from .models.vision_model import VisionModel, ModelPiezaLink
 
 #Database settings
 DATABASE_URL = os.getenv("DATABASE_URL")

@@ -1,3 +1,5 @@
 pika
 redis
 pillow
+json 
+subprocess

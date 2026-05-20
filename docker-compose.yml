@@ -71,7 +71,38 @@ services:
     tty: true
     networks:
       - app-network
-
+  model_tool:
+    build:
+      context: ./trainer
+      dockerfile: Dockerfile
+    container_name: yolo_trainer_worker
+    env_file:
+      - .env
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_HOME=/usr/local/cuda
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./trainer/src/modelWorker.py:/app/src/modelWorker.py
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
+    networks:
+      - app-network
   backend_server:
     build:
       context: ./backend           
@@ -92,7 +123,6 @@ services:
         condition: service_started
     networks:
       - app-network
-
   db:
     image: postgres:16-alpine
     ports:

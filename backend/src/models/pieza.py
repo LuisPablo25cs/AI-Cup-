@@ -14,7 +14,6 @@ class Pieza(SQLModel, table=True):
     )
     nombre: str
     descripcion: str | None = None
-    cantidad_estimada: int = 1
     activo: bool = True
     created_at: datetime = Field(
     sa_column=SAColumn(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
