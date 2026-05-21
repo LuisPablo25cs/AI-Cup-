@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from src.db import test_connection, init_db, AsyncSessionLocal
 from src.models.imagen import Imagen
@@ -20,10 +21,10 @@ import time
 from pathlib import Path
 from pydantic import BaseModel
 from typing import List
-
+import shutil
 Path("/app/data").mkdir(exist_ok=True)
 
-def connect_rabbitmq(retries=10, delay=5):
+def connect_rabbitmq(retries=10, delay=10):
     for attempt in range(retries):
         try:
             conn = pika.BlockingConnection(
@@ -36,11 +37,7 @@ def connect_rabbitmq(retries=10, delay=5):
             time.sleep(delay)
     raise Exception("Could not connect to RabbitMQ after retries")
 
-conn = connect_rabbitmq()
-channel = conn.channel()
-channel.queue_declare(queue="blender-queue", durable=True)
-channel.queue_declare(queue="grounding-sam-queue", durable=True)
-channel.queue_declare(queue="trainer-queue", durable=True)
+
 
 
 r = redis.Redis(host="redis", port=6379, db=0)
@@ -58,7 +55,7 @@ fileTypes = [
 
 #Classes 
 class ImageConfirmation(BaseModel):
-    frame: int
+    frame: str
     status: str
 
 class GenerateModelRequest(BaseModel):
@@ -74,7 +71,7 @@ async def lifespan(app: FastAPI):
     print("Server is closing")
 
 app = FastAPI(lifespan=lifespan)
-
+app.mount("/staging", StaticFiles(directory="/staging"), name="staging")
 @app.get("/health")
 def health():
     return {"message": "healthy"}
@@ -113,15 +110,20 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
         r.setex(f"prompt:{taskID}", 1800, prompt)
         r.setex(f"path:{taskID}", 1800, path)
         r.setex(f"status:{taskID}", 1800, "QUEUED")
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
+        channel = connection.channel()
+        channel.queue_declare(queue="blender-queue", durable=True)
         channel.basic_publish(
             exchange='', 
             routing_key="blender-queue", 
             body=json.dumps({
-                "task_id" : taskID,
-                "scene_file" : path, 
-                "prompt" : prompt, 
-                "n_images" : 8
-            }))
+                "task_id": taskID,
+                "scene_file": path, 
+                "prompt": prompt, 
+            }),
+            properties=pika.BasicProperties(delivery_mode=2) # Persistent message
+        )
+        connection.close()
         return {
             "task_id": taskID,
             "status": "QUEUED",
@@ -289,6 +291,13 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
         update_pipe.execute()
         
     transaction_status = True if (approved + rejected) == total else False
+    task_dir = os.path.join("/staging", taskID)
+    if os.path.exists(task_dir):
+        try:
+            shutil.rmtree(task_dir)
+            print(f"Cleaned up staging folder: {task_dir}")
+        except Exception as err:
+            print(f"Error cleaning up staging folder {task_dir}: {err}")
     return {
         "task_id": taskID,
         "transaction_status": transaction_status, 
@@ -322,6 +331,9 @@ async def generateModel(request: GenerateModelRequest):
         await db_session.commit()
 
         # 4. Publish training job payload to RabbitMQ
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
+        channel = connection.channel()
+        channel.queue_declare(queue="trainer-queue", durable=True)
         channel.basic_publish(
             exchange='',
             routing_key="trainer-queue",
@@ -335,8 +347,9 @@ async def generateModel(request: GenerateModelRequest):
                     } for idx, p_id in enumerate(request.piezas)
                 ]
             }),
-            properties=pika.BasicProperties(delivery_mode=2) # make message persistent
+            properties=pika.BasicProperties(delivery_mode=2) # Persistent message
         )
+        connection.close()
 
         return {
             "model_id": str(model.id_model),

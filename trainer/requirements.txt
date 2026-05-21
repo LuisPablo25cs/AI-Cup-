@@ -1,8 +1,9 @@
 ultralytics
 boto3
+redis
 fastapi
 uvicorn
-pila
+pika
 redis
 pillow
 sqlmodel

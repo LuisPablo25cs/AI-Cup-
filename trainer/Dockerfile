@@ -2,7 +2,7 @@ FROM python:3.10-slim
 
 # Install system dependencies for OpenCV and PyTorch/Ultralytics
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     build-essential \
     curl \
@@ -13,8 +13,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download YOLO weights to avoid download timeouts during training
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n-seg.pt')"
 
 COPY . .
 

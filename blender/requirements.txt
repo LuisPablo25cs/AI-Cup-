@@ -1,5 +1,4 @@
 pika
 redis
 pillow
-json 
-subprocess
+numpy

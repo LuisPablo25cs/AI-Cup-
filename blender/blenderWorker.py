@@ -1,12 +1,40 @@
 import subprocess
 import json
-def autoPhotoTaker3000(ch, method, properties, body):
-    task     = json.loads(body)
-    taskId   = task["task_id"]
-    sceneFile = task["scene_file"]   # /app/data/model.glb
-    prompt   = task["prompt"]
+import redis
+import pika
+import time
+import os
+from pathlib import Path
 
-    # Each task gets its own staging subfolder
+STAGING = Path(os.environ.get("STAGING_PATH", "/staging"))
+STAGING.mkdir(exist_ok=True)
+
+r = redis.Redis(host="redis", port=6379, db=0)
+
+def connect_rabbitmq(delay=10):
+    attempt = 0
+    while True:
+        try:
+            conn = pika.BlockingConnection(
+                pika.ConnectionParameters(
+                    host="rabbitmq",
+                    heartbeat=600,
+                    blocked_connection_timeout=300
+                )
+            )
+            print("Connected to RabbitMQ")
+            return conn
+        except Exception as e:
+            attempt += 1
+            print(f"RabbitMQ not ready (attempt {attempt}): {e} — retrying in {delay}s...")
+            time.sleep(delay)
+
+def autoPhotoTaker3000(ch, method, properties, body):
+    task      = json.loads(body)
+    taskId    = task["task_id"]
+    sceneFile = task["scene_file"]
+    prompt    = task["prompt"]
+
     task_staging = STAGING / taskId
     task_staging.mkdir(exist_ok=True)
 
@@ -16,9 +44,8 @@ def autoPhotoTaker3000(ch, method, properties, body):
         "--", sceneFile, str(task_staging)
     ], check=True)
 
-    # Now publish one message per rendered image
     for img_path in task_staging.glob("*.png"):
-        frame = img_path.stem   # filename without extension as frame id
+        frame    = img_path.stem
         meta_key = f"staging:{taskId}:{frame}"
         r.setex(meta_key, 86400, json.dumps({
             "local_path": str(img_path),
@@ -37,3 +64,20 @@ def autoPhotoTaker3000(ch, method, properties, body):
         )
 
     ch.basic_ack(delivery_tag=method.delivery_tag)
+
+while True:
+    try:
+        conn    = connect_rabbitmq()
+        channel = conn.channel()
+        channel.queue_declare(queue="blender-queue", durable=True)
+        channel.queue_declare(queue="grounding-sam-queue", durable=True)
+        channel.basic_qos(prefetch_count=1)
+        channel.basic_consume(queue="blender-queue", on_message_callback=autoPhotoTaker3000)
+        print("Blender worker ready, waiting for jobs...")
+        channel.start_consuming()
+    except KeyboardInterrupt:
+        print("Shutting down")
+        break
+    except Exception as e:
+        print(f"Connection lost or failed: {e} — retrying in 10s...")
+        time.sleep(10)

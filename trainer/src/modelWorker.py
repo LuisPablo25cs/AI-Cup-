@@ -4,6 +4,7 @@ import time
 import json
 import uuid
 import boto3
+import redis
 import shutil
 import random
 from pathlib import Path
@@ -14,6 +15,12 @@ from ultralytics import YOLO
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import SQLModel, Field, select
+
+channel = conn.channel()
+#toDo-If you see all of this be very sceptical of how this works, this is only a template
+channel.queue_declare(queue="blender-queue", durable=True)
+
+r = redis.Redis(host="redis", port=6379, db=0)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://admin:admin@db:5432/kitting_db")
 ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")

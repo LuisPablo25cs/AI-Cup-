@@ -30,15 +30,29 @@ services:
     environment:
       - STAGING_PATH=/staging
       - TZ=America/Hermosillo
+      - PYTHONUNBUFFERED=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_HOME=/usr/local/cuda
     volumes:
       - ./blender/scenes:/scenes       
-      - ./blender/staging:/staging      
+      - ./blender/staging:/staging
+      - temp-data:/app/data
+      - ./blender/blenderWorker.py:/app/blenderWorker.py
+      - ./blender/render:/app/render      
+
     restart: unless-stopped
     depends_on: 
       rabbitmq: 
         condition: service_healthy
       redis: 
         condition: service_started
+    deploy: 
+      resources: 
+        reservations: 
+          devices: 
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     networks:
       - app-network
 
@@ -60,6 +74,7 @@ services:
     volumes:
       - ./anotation/dinoWorker.py:/app/dinoWorker.py
       - ./anotation/datasets:/app/datasets
+      - ./blender/staging:/staging
     deploy:
       resources:
         reservations:
@@ -109,6 +124,8 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./backend:/app
+      - temp-data:/app/data
+      - ./blender/staging:/staging
     ports:
       - "8000:8000"
     env_file:
