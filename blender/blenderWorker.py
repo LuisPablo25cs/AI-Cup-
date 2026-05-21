@@ -38,11 +38,18 @@ def autoPhotoTaker3000(ch, method, properties, body):
     task_staging = STAGING / taskId
     task_staging.mkdir(exist_ok=True)
 
-    subprocess.run([
+    process = subprocess.Popen([
         "blender", "--background",
         "--python", "/app/render/renderScene.py",
         "--", sceneFile, str(task_staging)
-    ], check=True)
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for line in process.stdout:
+        # Only print our clean progress lines, model details, or error tracebacks
+        if "blanco" in line or "gris" in line or "negro" in line or "hdri" in line or "Completado" in line or "Modelo:" in line:
+            print(line.strip(), flush=True)
+        elif "Traceback" in line or "Error" in line:
+            print(line.strip(), flush=True)
+    process.wait()
 
     for img_path in task_staging.glob("*.png"):
         frame    = img_path.stem
