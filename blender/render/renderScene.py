@@ -153,7 +153,7 @@ print(f"   Centro: {centro} | Alto: {alto_obj:.2f}")
 
 #Configurar render 
 scene.render.engine = 'CYCLES'
-scene.render.use_persisten_data = True
+scene.render.use_persistent_data = True
 cycles = scene.cycles
 scene.render.image_settings.quality = 95
 
