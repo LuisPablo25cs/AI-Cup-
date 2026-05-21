@@ -150,23 +150,33 @@ centro = Vector((
 alto_obj = max(v.z for v in bbox) - min(v.z for v in bbox)
 print(f"   Centro: {centro} | Alto: {alto_obj:.2f}")
 
-# --- CONFIGURAR RENDER (Optimizado para A100 GPU sin OptiX) ---
+#Configurar render 
 scene.render.engine = 'CYCLES'
 cycles = scene.cycles
-cycles.device = 'GPU'
-cycles.samples = samples
-cycles.use_denoising = True
-cycles.denoiser = 'OPENIMAGEDENOISE' # OpenImageDenoise es 100% estable en A100
 
-prefs  = bpy.context.preferences
+prefs = bpy.context.preferences
 cprefs = prefs.addons['cycles'].preferences
 cprefs.compute_device_type = 'CUDA'
 cprefs.refresh_devices()
-for d in cprefs.devices:
+for d in cprefs.devices: 
     d.use = (d.type == 'CUDA')
-    if d.use:
-        print(f"   Activating CUDA GPU: {d.name}")
-
+    if d.use: 
+        print(f" Activating CUDA GPU: {d.name}")
+cycles.device = 'GPU'
+cycles.samples = samples
+ 
+# 2. Configurar Denoiser de manera segura y con fallback progresivo
+cycles.use_denoising = True
+try:
+    cycles.denoiser = 'OPENIMAGEDENOISE'
+    print("   Using OPENIMAGEDENOISE for denoising")
+except TypeError:
+    try:
+        cycles.denoiser = 'OPTIX'
+        print("   Using OPTIX for denoising")
+    except TypeError:
+        cycles.use_denoising = False
+        print("   Warning: OpenImageDenoise and OptiX are not supported in this Blender build. Denoising disabled.")
 res_x = 1920
 res_y = 1080
 scene.render.resolution_x = res_x
