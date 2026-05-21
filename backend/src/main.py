@@ -1,3 +1,4 @@
+
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ import redis
 import uuid
 import os
 from PIL import Image
-#from ultralytics import YOLO
+from ultralytics import YOLO
 import json
 import time
 from pathlib import Path

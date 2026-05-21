@@ -1,60 +1,104 @@
 # AI KITTING INSPECTION - BACKEND
 
-La produccion se esta realizando en un ambiente basado en el contenedor.
+El desarrollo se realiza dentro de un contenedor usando Dev Containers. Al abrir el contenedor, el servidor FastAPI arranca automáticamente.
 
-1. Descarga dev containers.
-2. ctrl + shift + p
-3. reopen in container
+## Requisitos
 
-El servidor no se abrira automaticamente. Usa el comando:
-uvicorn src.runserver:app --host 0.0.0.0 --port 8000 --reload
+- Docker Desktop
+- Extensión [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) en VS Code
+- NVIDIA Container Toolkit (para el servicio de anotación con GPU)
 
+## Abrir el proyecto
 
-En caso de error comenzar revisando devcontainer.json
-(Se encarga de manejar eso)
+1. Clona el repositorio
+2. Abre VS Code en la raíz del proyecto
+3. `Ctrl + Shift + P` → **Dev Containers: Reopen in Container**
 
-Con respecto a los contenedores, estoy considerando dividir esto en dos
-uno para el servidor y otro para la base de datos (en lo que se hace deploy a esta)
+El servidor FastAPI arranca automáticamente en `http://localhost:8000`.  
+La documentación interactiva está en `http://localhost:8000/docs`.
+
+## Servicios
+
+El proyecto usa Docker Compose con los siguientes servicios:
+
+| Servicio | Descripción | Puerto |
+|---|---|---|
+| `backend_server` | API FastAPI (devcontainer) | 8000 |
+| `db` | PostgreSQL 16 | 5432 |
+| `rabbitmq` | Message broker | 5672 / 15672 |
+| `redis` | Cache y cola de tareas | 6379 |
+| `ai-tool` | Worker de anotación con GPU | — |
+| `blender-tool` | Renderizado automático de imágenes | — |
+
+## Base de datos
+
+La conexión a PostgreSQL está configurada con SQLTools. Para agregar la conexión:
+
+1. `Ctrl + Shift + P` → **SQLTools: Add New Connection**
+2. Usa estos datos:
+
+| Campo | Valor |
+|---|---|
+| Connection name | kitting_db |
+| Server Address | db |
+| Port | 5432 |
+| Database | kitting_db |
+| Username | admin |
+| Password | admin |
+
+El archivo `kitting_db.sessions.sql` permite hacer queries manuales sin necesidad de tener PostgreSQL instalado localmente.
+
+### Resetear la base de datos
+
+Solo reiniciar el servicio (mantiene datos):
+```bash
+docker compose restart db
+```
+
+Borrar datos y empezar desde cero:
+```bash
+docker compose down -v   # -v elimina el volumen postgres_data
+docker compose up -d
+```
+
+Solo borrar tablas desde código:
+```python
+SQLModel.metadata.drop_all(engine)
+SQLModel.metadata.create_all(engine)
+```
+
+## Variables de entorno
+
+Las variables de entorno van en un archivo `.env` en la raíz del proyecto. Ejemplo:
+
+```env
+DATABASE_URL=postgresql://admin:admin@db:5432/kitting_db
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=...
+S3_BUCKET_NAME=...
+```
+
+## Comandos útiles
+
+Reconstruir el backend después de cambiar `requirements.txt`:
+```bash
+docker compose up -d --build backend_server
+```
+
+Ver todos los contenedores corriendo:
+```bash
+docker ps
+```
+
+Ver logs de un servicio:
+```bash
+docker compose logs -f backend_server
+```
 
 ## Funcionalidades
 
-* Recibir imagenes a partir de una camara
-* Guardar metadata de las imagenes
-* Mandar imagenes a almacenamiento en S3
-
-
-
-##  base de datos
-
-### chistosadas para comprobar
-Respecto a la base de datos le agregue una conexion usando SQLTools para facilitar el desarrollo.
-kitting_db.sessions.sql
-permitira hacer queries a mano para comprobar secciones sin necesidad de tener postgres fuera del contenedor
-No se si cada quien ocupa crear su propia conexión pero la mía es de que:
-1. ctrl + shift + p
-2. SQLTools: Add New Connection
-
-Connection name:  kitting_db
-Server Address:   db
-Port:             5432
-Database:         kitting_db
-Username:         admin
-Use password:     Save as plaintext
-Password:         admin
-
-### reiniciar segun chat
-
-Sí, tienes tres niveles según qué tanto quieres resetear:
-Solo reiniciar el servicio (mantiene datos):
-docker compose restart db
-
-Borrar datos y empezar desde cero:
-docker compose down -v   # -v elimina el volumen postgres_data
-docker compose up -d
-
-Solo borrar tablas desde tu código — con SQLModel:
-
-SQLModel.metadata.drop_all(engine)
-SQLModel.metadata.create_all(engine)
-
-El -v es la opción clave — sin él down preserva el volumen y tus datos sobreviven.
+- Recibir imágenes a partir de una cámara
+- Guardar metadata de las imágenes
+- Mandar imágenes a almacenamiento en S3
+- Detección de objetos vía worker de anotación (RabbitMQ + Redis)

@@ -9,3 +9,4 @@ pika
 redis
 pillow
 ultralytics
+opencv-python-headless
