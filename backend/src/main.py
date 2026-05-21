@@ -103,14 +103,14 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
 
     taskID = str(uuid.uuid4())
     try:
-        r.setex(f"class_id:{taskID}", 1800, str(pieza_id))
-        r.setex(f"file:{taskID}", 1800, file.filename)
+        r.setex(f"class_id:{taskID}", 86400, str(pieza_id))
+        r.setex(f"file:{taskID}", 86400, file.filename)
         path = f"/app/data/{file.filename}"
         with open(path, "wb") as buffer: 
             buffer.write(await file.read())
-        r.setex(f"prompt:{taskID}", 1800, prompt)
-        r.setex(f"path:{taskID}", 1800, path)
-        r.setex(f"status:{taskID}", 1800, "QUEUED")
+        r.setex(f"prompt:{taskID}", 86400, prompt)
+        r.setex(f"path:{taskID}", 86400, path)
+        r.setex(f"status:{taskID}", 86400, "QUEUED")
         connection = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
         channel = connection.channel()
         channel.queue_declare(queue="blender-queue", durable=True)

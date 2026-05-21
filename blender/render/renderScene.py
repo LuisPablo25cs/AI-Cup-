@@ -31,7 +31,8 @@ print(f"{'='*60}")
 # ============================================================
 # En el contenedor, la carpeta de HDRIs se monta en /scenes/hdri
 carpeta_hdri    = os.environ.get("HDRI_PATH", "/scenes/hdri")
-formato         = "PNG"
+formato         = "JPEG"
+ext             = 'jpg'
 samples         = 128
 margen_camara   = 4
 ESCALA_ESTANDAR = 1.5
@@ -152,7 +153,9 @@ print(f"   Centro: {centro} | Alto: {alto_obj:.2f}")
 
 #Configurar render 
 scene.render.engine = 'CYCLES'
+scene.render.use_persisten_data = True
 cycles = scene.cycles
+scene.render.image_settings.quality = 95
 
 prefs = bpy.context.preferences
 cprefs = prefs.addons['cycles'].preferences
@@ -299,7 +302,7 @@ for ruta_hdri in hdris_disponibles:
         obj.rotation_euler.z = math.radians(rot_z)
         posicionar_camara(elevacion)
         bpy.context.view_layer.update()
-        nombre_img = f"hdri_{nombre_hdri}_{nombre_vista}.png"
+        nombre_img = f"hdri_{nombre_hdri}_{nombre_vista}.{ext}"
         scene.render.filepath = os.path.join(output_dir, nombre_img)
         count += 1
         print(f"  [{count}] {nombre_img}...")
@@ -314,7 +317,7 @@ for nombre_fondo, color_fondo, intensidad in fondos_solidos:
             obj.rotation_euler.z = math.radians(rot_z)
             posicionar_camara(elevacion)
             bpy.context.view_layer.update()
-            nombre_img = f"{nombre_fondo}_{nombre_perfil}_{nombre_vista}.png"
+            nombre_img = f"{nombre_fondo}_{nombre_perfil}_{nombre_vista}.{ext}"
             scene.render.filepath = os.path.join(output_dir, nombre_img)
             count += 1
             print(f"  [{count}] {nombre_img}...")
