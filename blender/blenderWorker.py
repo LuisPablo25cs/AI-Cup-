@@ -43,34 +43,45 @@ def autoPhotoTaker3000(ch, method, properties, body):
         "--python", "/app/render/renderScene.py",
         "--", sceneFile, str(task_staging)
     ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    
     for line in process.stdout:
-        # Only print our clean progress lines, model details, or error tracebacks
-        if "blanco" in line or "gris" in line or "negro" in line or "hdri" in line or "Completado" in line or "Modelo:" in line:
+        # Print progress lines
+        if "blanco" in line or "gris" in line or "negro" in line or "hdri" in line or "Completado" in line or "Modelo:" in line or "Traceback" in line or "Error" in line:
             print(line.strip(), flush=True)
-        elif "Traceback" in line or "Error" in line:
-            print(line.strip(), flush=True)
-    process.wait()
+            
+        # Parse saved frames in real-time and pipeline them to DINO!
+        if "Saved:" in line:
+            try:
+                # Extracts the file path between single quotes
+                start_idx = line.find("'") + 1
+                end_idx = line.rfind("'")
+                img_path_str = line[start_idx:end_idx]
+                img_path = Path(img_path_str)
+                
+                # Double-check file exists before queuing
+                if img_path.exists():
+                    frame = img_path.stem
+                    meta_key = f"staging:{taskId}:{frame}"
+                    r.setex(meta_key, 86400, json.dumps({
+                        "local_path": str(img_path),
+                        "status":     "pending",
+                        "taskId":     taskId,
+                        "frame":      frame
+                    }))
+                    ch.basic_publish(
+                        exchange="",
+                        routing_key="grounding-sam-queue",
+                        body=json.dumps({
+                            "taskId": taskId,
+                            "frame":  frame,
+                            "path":   str(img_path)
+                        })
+                    )
+                    print(f"--> [Pipelined] Queued {frame} for DINO annotation", flush=True)
+            except Exception as e:
+                print(f"Error pipelining frame: {e}", flush=True)
 
-    for img_path in task_staging.glob("*.png"):
-        frame    = img_path.stem
-        meta_key = f"staging:{taskId}:{frame}"
-        r.setex(meta_key, 86400, json.dumps({
-            "local_path": str(img_path),
-            "status":     "pending",
-            "taskId":     taskId,
-            "frame":      frame
-        }))
-        ch.basic_publish(
-            exchange="",
-            routing_key="grounding-sam-queue",
-            body=json.dumps({
-                "taskId": taskId,
-                "frame":  frame,
-                "path":   str(img_path)
-            })
-        )
 
-    ch.basic_ack(delivery_tag=method.delivery_tag)
 
 while True:
     try:
