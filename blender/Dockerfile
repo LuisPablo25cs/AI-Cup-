@@ -5,6 +5,8 @@ ENV BLENDER_MAJOR=4.2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget xz-utils \
     libxi6 libxxf86vm1 libxrender1 libxfixes3 libgl1 libgomp1 \
+    libxkbcommon0 libxkbcommon-x11-0 libsm6 libxext6 libx11-6 libglu1-mesa \
+    libxcursor1 libxinerama1 libxrandr2 libdbus-1-3 \
     python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
