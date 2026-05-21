@@ -118,7 +118,7 @@ def onAnnotationJob(ch, method, properties, body):
         return
 
     prompt  = promptRaw.decode()
-    classId = int(classRaw.decode()) if classRaw else 0
+    classId = classRaw.decode() if classRaw else "0"
     metaKey = f"staging:{taskId}:{frame}"
 
     r.setex(metaKey, 86400, json.dumps({
