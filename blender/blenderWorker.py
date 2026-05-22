@@ -35,6 +35,10 @@ def autoPhotoTaker3000(ch, method, properties, body):
     sceneFile = task["scene_file"]
     prompt    = task["prompt"]
 
+    # Ack immediately so RabbitMQ's consumer_timeout (30 min)
+    # doesn't kill the channel during long renders.
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
     task_staging = STAGING / taskId
     task_staging.mkdir(exist_ok=True)
 
