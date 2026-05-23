@@ -121,7 +121,7 @@ def onAnnotationJob(ch, method, properties, body):
     classId = classRaw.decode() if classRaw else "0"
     metaKey = f"staging:{taskId}:{frame}"
 
-    r.setex(metaKey, 86400, json.dumps({
+    r.setex(metaKey, 864000, json.dumps({
         "local_path": imagePath,
         "status":     "annotating",
         "task_id":    taskId,
@@ -131,7 +131,7 @@ def onAnnotationJob(ch, method, properties, body):
     res = annotateImage(imagePath, prompt, classId, taskId, frame)
 
     if res:
-        r.setex(metaKey, 86400, json.dumps({
+        r.setex(metaKey, 864000, json.dumps({
             "local_path":  imagePath,
             "txt_path":    res["txt_path"],
             "visual_path": res["visual_path"],
@@ -145,7 +145,7 @@ def onAnnotationJob(ch, method, properties, body):
             body=json.dumps({"task_id": taskId, "frame": frame})
         )
     else:
-        r.setex(metaKey, 86400, json.dumps({
+        r.setex(metaKey, 864000, json.dumps({
             "local_path": imagePath,
             "status":     "no_detection",
             "task_id":    taskId,

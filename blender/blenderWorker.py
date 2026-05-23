@@ -66,7 +66,7 @@ def autoPhotoTaker3000(ch, method, properties, body):
                 if img_path.exists():
                     frame = img_path.stem
                     meta_key = f"staging:{taskId}:{frame}"
-                    r.setex(meta_key, 86400, json.dumps({
+                    r.setex(meta_key, 864000, json.dumps({
                         "local_path": str(img_path),
                         "status":     "pending",
                         "taskId":     taskId,

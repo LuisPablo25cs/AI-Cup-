@@ -23,6 +23,9 @@ from pathlib import Path
 from pydantic import BaseModel
 from typing import List
 import shutil
+import zipfile
+import shutil
+
 Path("/app/data").mkdir(exist_ok=True)
 
 def connect_rabbitmq(retries=10, delay=10):
@@ -46,6 +49,8 @@ r = redis.Redis(host="redis", port=6379, db=0)
 fileTypes = [
     "model/gltf-binary",      # .glb MIME type
     "application/octet-stream" # fallback some clients send for .glb
+    "application/zip"
+    "application/x-zim-compressed"
 ]
 
 #PATH_MODELO = "yolov8n-seg.pt"
@@ -102,12 +107,27 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
         pieza_id = new_pieza.id_pieza
 
     taskID = str(uuid.uuid4())
+    task_dir = os.path.join("/app/data", taskID)
+    os.makedirs(task_dir, exist_ok=True)
     try:
         r.setex(f"class_id:{taskID}", 864000, str(pieza_id))
         r.setex(f"file:{taskID}", 864000, file.filename)
-        path = f"/app/data/{file.filename}"
+        path = os.path.koin(task_dir, file.filename)
+
         with open(path, "wb") as buffer: 
             buffer.write(await file.read())
+
+        if file.filename.lower().endswith(".zip"): 
+            with zipfile.ZipFile(path, 'r') as zip_ref: 
+                zip_ref.extractall(task_dir)
+            os.remove(path)
+            objFiles = list(Path(task_dir).glob("**/.obj"))
+            if not objFiles: 
+                shutil.rmtree(task_dir)
+                raise HTTPException(status_code=400, detail="No .obj file founded in zip")
+            #This is the .obj path
+            path = str(objFiles[0])
+
         r.setex(f"prompt:{taskID}", 864000, prompt)
         r.setex(f"path:{taskID}", 864000, path)
         r.setex(f"status:{taskID}", 864000, "QUEUED")
@@ -222,7 +242,7 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
         if normalized_status in ("approved", "aproved"):
             approved += 1
             data["status"] = "approved"
-            update_pipe.setex(f"staging:{taskID}:{img.frame}", 86400, json.dumps(data))
+            update_pipe.setex(f"staging:{taskID}:{img.frame}", 864000, json.dumps(data))
             has_updates = True
             
             # S3 and Postgres logic
@@ -270,7 +290,7 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
         elif normalized_status in ("rejected", "not_approved", "not_aproved"):
             rejected += 1
             data["status"] = "rejected"
-            update_pipe.setex(f"staging:{taskID}:{img.frame}", 86400, json.dumps(data))
+            update_pipe.setex(f"staging:{taskID}:{img.frame}", 864000, json.dumps(data))
             has_updates = True
             
             # Clean up local files
