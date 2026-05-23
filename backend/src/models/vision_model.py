@@ -4,15 +4,16 @@ from datetime import datetime, timezone
 import sqlalchemy.dialects.postgresql as pg
 from sqlalchemy import Column as SAColumn
 from sqlalchemy import DateTime
+from sqlalchemy import ForeignKey
 
 class ModelPiezaLink(SQLModel, table=True):
     __tablename__ = "model_pieza_link"
     
     id_model: UUID = Field(
-        sa_column=SAColumn(pg.UUID, primary_key=True, foreign_key="vision_model.id_model")
+        sa_column=SAColumn(pg.UUID, ForeignKey("vision_model.id_model"), primary_key=True)
     )
     id_pieza: UUID = Field(
-        sa_column=SAColumn(pg.UUID, primary_key=True, foreign_key="pieza.id_pieza")
+        sa_column=SAColumn(pg.UUID, ForeignKey("pieza.id_pieza"), primary_key=True)
     )
     class_index: int  # YOLO class index (0, 1, 2, ...)
 

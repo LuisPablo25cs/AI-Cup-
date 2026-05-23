@@ -12,26 +12,28 @@ s3_client = boto3.client(
 BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
 
-def upload_label(file_bytes: bytes, id_pieza: str, filename_uuid: str, variante: str = "sin_bolsa") -> tuple[str, str]:
+def upload_imagen(file_bytes: bytes, id_pieza: str, content_type: str = "image/jpeg", filename_uuid: str | None = None, variante: str = "sin_bolsa") -> tuple[str, str]:
     """
-    Sube archivo de etiquetas (.txt) a S3 en la carpeta de su variante y retorna (bucket, key_s3_label)
+    Sube imagen a S3 y retorna (bucket, key_s3)
     """
-    key = f"piezas/{id_pieza}/{variante}/{filename_uuid}.txt"  # <-- Ahora usa la variante y coincide con la imagen
+    name_uuid = filename_uuid or str(uuid4())
+    key = f"piezas/{id_pieza}/{variante}/{name_uuid}.jpg"
 
     s3_client.put_object(
         Bucket=BUCKET_NAME,
         Key=key,
         Body=file_bytes,
-        ContentType="text/plain"
+        ContentType=content_type
     )
 
     return BUCKET_NAME, key
 
-def upload_label(file_bytes: bytes, id_pieza: str, filename_uuid: str) -> tuple[str, str]:
+
+def upload_label(file_bytes: bytes, id_pieza: str, filename_uuid: str, variante: str = "sin_bolsa") -> tuple[str, str]:
     """
-    Sube archivo de etiquetas (.txt) a S3 y retorna (bucket, key_s3_label)
+    Sube archivo de etiquetas (.txt) a S3 en la carpeta de su variante y retorna (bucket, key_s3_label)
     """
-    key = f"piezas/{id_pieza}/{filename_uuid}.txt"
+    key = f"piezas/{id_pieza}/{variante}/{filename_uuid}.txt"
 
     s3_client.put_object(
         Bucket=BUCKET_NAME,
