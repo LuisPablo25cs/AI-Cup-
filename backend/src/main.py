@@ -48,9 +48,9 @@ r = redis.Redis(host="redis", port=6379, db=0)
 
 fileTypes = [
     "model/gltf-binary",      # .glb MIME type
-    "application/octet-stream" # fallback some clients send for .glb
-    "application/zip"
-    "application/x-zim-compressed"
+    "application/octet-stream", # fallback some clients send for .glb
+    "application/zip",
+    "application/x-zim-compressed",
 ]
 
 #PATH_MODELO = "yolov8n-seg.pt"
@@ -112,7 +112,7 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
     try:
         r.setex(f"class_id:{taskID}", 864000, str(pieza_id))
         r.setex(f"file:{taskID}", 864000, file.filename)
-        path = os.path.koin(task_dir, file.filename)
+        path = os.path.join(task_dir, file.filename)
 
         with open(path, "wb") as buffer: 
             buffer.write(await file.read())
@@ -121,7 +121,7 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
             with zipfile.ZipFile(path, 'r') as zip_ref: 
                 zip_ref.extractall(task_dir)
             os.remove(path)
-            objFiles = list(Path(task_dir).glob("**/.obj"))
+            objFiles = list(Path(task_dir).glob("**/*.obj"))
             if not objFiles: 
                 shutil.rmtree(task_dir)
                 raise HTTPException(status_code=400, detail="No .obj file founded in zip")
