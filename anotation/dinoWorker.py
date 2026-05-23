@@ -10,6 +10,7 @@ from torchvision.ops import box_convert
 from pathlib import Path
 import json
 import time
+import shutil
 
 r = redis.Redis(host="redis", port=6379, db=0)
 
@@ -108,34 +109,31 @@ def onAnnotationJob(ch, method, properties, body):
     taskId    = job["taskId"]
     frame     = job["frame"]
     imagePath = job["path"]
-
     promptRaw = r.get(f"prompt:{taskId}")
     classRaw  = r.get(f"class_id:{taskId}")
-
     if not promptRaw:
         print(f"No prompt found for task {taskId} — rejecting")
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         return
-
     prompt  = promptRaw.decode()
     classId = classRaw.decode() if classRaw else "0"
-    metaKey = f"staging:{taskId}:{frame}"
-
+    metaKey = f"staging:{taskId}:sin_bolsa_{frame}"
     r.setex(metaKey, 864000, json.dumps({
         "local_path": imagePath,
         "status":     "annotating",
+        "variante":   "sin_bolsa",
         "task_id":    taskId,
         "frame":      frame
     }))
-
     res = annotateImage(imagePath, prompt, classId, taskId, frame)
-
     if res:
+        # 1. Update the unbagged frame as ready for validation
         r.setex(metaKey, 864000, json.dumps({
             "local_path":  imagePath,
             "txt_path":    res["txt_path"],
             "visual_path": res["visual_path"],
             "status":      "pending_validation",
+            "variante":    "sin_bolsa",
             "task_id":     taskId,
             "frame":       frame
         }))
@@ -144,14 +142,33 @@ def onAnnotationJob(ch, method, properties, body):
             routing_key="to-validate-imgs-queue",
             body=json.dumps({"task_id": taskId, "frame": frame})
         )
+        # 2. Propagate the label to all bagged twins awaiting this frame
+        twin_keys = list(r.scan_iter(f"staging:{taskId}:con_bolsa_*_{frame}"))
+        for twin_key in twin_keys:
+            twin_raw = r.get(twin_key)
+            if not twin_raw:
+                continue
+            twin_data = json.loads(twin_raw)
+            if twin_data.get("status") != "awaiting_twin_label":
+                continue
+            # Copy the .txt label file to the bagged frame's directory
+            twin_img_path = Path(twin_data["local_path"])
+            twin_txt_path = twin_img_path.with_suffix(".txt")
+            shutil.copy2(res["txt_path"], str(twin_txt_path))
+            # Update the bagged twin's status to pending_validation
+            twin_data["txt_path"] = str(twin_txt_path)
+            twin_data["status"]   = "pending_validation"
+            r.setex(twin_key, 864000, json.dumps(twin_data))
+            variante = twin_data.get("variante", "unknown")
+            print(f"--> [Twin] Propagated label to {variante}/{frame}", flush=True)
     else:
         r.setex(metaKey, 864000, json.dumps({
             "local_path": imagePath,
             "status":     "no_detection",
+            "variante":   "sin_bolsa",
             "task_id":    taskId,
             "frame":      frame
         }))
-
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 while True:

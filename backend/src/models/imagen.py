@@ -20,7 +20,7 @@ class Imagen(SQLModel, table=True):
     bucket: str                          # nombre del bucket
     key_s3: str                          # pieza/{id_pieza}/{uuid}.jpg
     key_s3_label: str | None = None      # pieza/{id_pieza}/{uuid}.txt
-
+    bagType : str = "no_bag"             #By default, no bag. 
     # La URL completa se deriva: f"{bucket}/{key_s3}" — no se guarda en BD
 
     # Metadatos de imagen

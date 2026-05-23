@@ -34,10 +34,13 @@ def autoPhotoTaker3000(ch, method, properties, body):
     taskId    = task["task_id"]
     sceneFile = task["scene_file"]
     prompt    = task["prompt"]
+    bagTypes  = task.get("bag_types", [])
 
     # Ack immediately so RabbitMQ's consumer_timeout (30 min)
     # doesn't kill the channel during long renders.
     ch.basic_ack(delivery_tag=method.delivery_tag)
+
+    bag_arg = ",".join(bagTypes) if bagTypes else "none"
 
     task_staging = STAGING / taskId
     task_staging.mkdir(exist_ok=True)
@@ -45,15 +48,15 @@ def autoPhotoTaker3000(ch, method, properties, body):
     process = subprocess.Popen([
         "blender", "--background",
         "--python", "/app/render/renderScene.py",
-        "--", sceneFile, str(task_staging)
+        "--", sceneFile, str(task_staging), bag_arg
     ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     
     for line in process.stdout:
         # Print progress lines
-        if "blanco" in line or "gris" in line or "negro" in line or "hdri" in line or "Completado" in line or "Modelo:" in line or "Traceback" in line or "Error" in line:
+        if "blanco" in line or "gris" in line or "negro" in line or "hdri" in line or "Completado" in line or "Modelo:" in line or "Traceback" in line or "Error" in line or "Bolsa" in line or "Simulando" in line:
             print(line.strip(), flush=True)
             
-        # Parse saved frames in real-time and pipeline them to DINO!
+        # Parse saved frames in real-time and route them
         if "Saved:" in line:
             try:
                 # Extracts the file path between single quotes
@@ -65,23 +68,43 @@ def autoPhotoTaker3000(ch, method, properties, body):
                 # Double-check file exists before queuing
                 if img_path.exists():
                     frame = img_path.stem
-                    meta_key = f"staging:{taskId}:{frame}"
-                    r.setex(meta_key, 864000, json.dumps({
-                        "local_path": str(img_path),
-                        "status":     "pending",
-                        "taskId":     taskId,
-                        "frame":      frame
-                    }))
-                    ch.basic_publish(
-                        exchange="",
-                        routing_key="grounding-sam-queue",
-                        body=json.dumps({
-                            "taskId": taskId,
-                            "frame":  frame,
-                            "path":   str(img_path)
-                        })
-                    )
-                    print(f"--> [Pipelined] Queued {frame} for DINO annotation", flush=True)
+
+                    # Determine if this frame is from a bag variant or the base render
+                    # The render script outputs to: .../sin_bolsa/frame.jpg or .../con_bolsa_clear/frame.jpg
+                    parent_folder = img_path.parent.name
+
+                    if parent_folder.startswith("con_bolsa_"):
+                        # BAGGED FRAME: do NOT send to DINO. Store as awaiting its twin's label.
+                        variante = parent_folder  # e.g., "con_bolsa_clear"
+                        meta_key = f"staging:{taskId}:{variante}_{frame}"
+                        r.setex(meta_key, 864000, json.dumps({
+                            "local_path": str(img_path),
+                            "status":     "awaiting_twin_label",
+                            "variante":   variante,
+                            "taskId":     taskId,
+                            "frame":      frame
+                        }))
+                        print(f"--> [Bag] Stored {variante}/{frame} — awaiting twin label", flush=True)
+                    else:
+                        # UNBAGGED FRAME: pipeline to DINO for annotation
+                        meta_key = f"staging:{taskId}:sin_bolsa_{frame}"
+                        r.setex(meta_key, 864000, json.dumps({
+                            "local_path": str(img_path),
+                            "status":     "pending",
+                            "variante":   "sin_bolsa",
+                            "taskId":     taskId,
+                            "frame":      frame
+                        }))
+                        ch.basic_publish(
+                            exchange="",
+                            routing_key="grounding-sam-queue",
+                            body=json.dumps({
+                                "taskId": taskId,
+                                "frame":  frame,
+                                "path":   str(img_path)
+                            })
+                        )
+                        print(f"--> [Pipelined] Queued sin_bolsa/{frame} for DINO annotation", flush=True)
             except Exception as e:
                 print(f"Error pipelining frame: {e}", flush=True)
 

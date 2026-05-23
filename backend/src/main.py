@@ -53,6 +53,8 @@ fileTypes = [
     "application/x-zim-compressed",
 ]
 
+AVAILABLE_BAG_TYPES = ["clear", "opaque"]
+
 #PATH_MODELO = "yolov8n-seg.pt"
 #def inferir(model, img): 
     #model = YOLO(model)
@@ -84,7 +86,11 @@ def health():
 
 
 @app.post("/publishNewPiece")
-async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)): 
+async def publishNewPiece(
+    prompt: str = Form(), 
+    file: UploadFile = File(...),
+    clear: bool = Form(False),
+    opaque: bool = Form(False)): #You could append more bags
     if file.content_type not in fileTypes: 
         raise HTTPException(
             status_code=400,
@@ -96,6 +102,12 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
             detail=f"Please provide a file: {file}"
         )
     
+    bagTypes = []
+    if clear: 
+        bagTypes.append("clear")
+    if opaque:
+        bagTypes.append("opaque")
+
     # Generate new Pieza internally in SQL database
     async with AsyncSessionLocal() as db_session:
         # Use filename as piece name and prompt as description
@@ -112,6 +124,7 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
     try:
         r.setex(f"class_id:{taskID}", 864000, str(pieza_id))
         r.setex(f"file:{taskID}", 864000, file.filename)
+        r.setex(f"bag_type:{taskID}", 864000, json.dumps(bagTypes))
         path = os.path.join(task_dir, file.filename)
 
         with open(path, "wb") as buffer: 
@@ -141,6 +154,7 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
                 "task_id": taskID,
                 "scene_file": path, 
                 "prompt": prompt, 
+                "bag_types" : bagTypes,
             }),
             properties=pika.BasicProperties(delivery_mode=2) # Persistent message
         )
@@ -148,6 +162,7 @@ async def publishNewPiece(prompt: str = Form(), file: UploadFile = File(...)):
         return {
             "task_id": taskID,
             "status": "QUEUED",
+            "bag_types": bagTypes,
             "message": "File received, validated and queued for processing"
         }
     except Exception as e:
@@ -244,6 +259,9 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
             data["status"] = "approved"
             update_pipe.setex(f"staging:{taskID}:{img.frame}", 864000, json.dumps(data))
             has_updates = True
+
+            # Determine the variant from the metadata (set by DINO worker)
+            variante = data.get("variante", "sin_bolsa")
             
             # S3 and Postgres logic
             if local_img_path and os.path.exists(local_img_path):
@@ -256,21 +274,22 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
                     with open(local_txt_path, "rb") as f_txt:
                         txt_bytes = f_txt.read()
                 
-                # 2. Upload to S3 sharing the exact same filename UUID
+                # 2. Upload to S3 using variant-specific subfolder
                 img_uuid = str(uuid.uuid4())
-                bucket, key_s3 = upload_imagen(img_bytes, str(pieza_id), filename_uuid=img_uuid)
+                bucket, key_s3 = upload_imagen(img_bytes, str(pieza_id), filename_uuid=img_uuid, variante=variante)
                 
                 key_s3_label = None
                 if txt_bytes:
-                    _, key_s3_label = upload_label(txt_bytes, str(pieza_id), filename_uuid=img_uuid)
+                    _, key_s3_label = upload_label(txt_bytes, str(pieza_id), filename_uuid=img_uuid, variante=variante)
                 
-                # 3. Create database entry
+                # 3. Create database entry with variant tracking
                 async with AsyncSessionLocal() as db_session:
                     db_img = Imagen(
                         id_pieza=pieza_id,
                         bucket=bucket,
                         key_s3=key_s3,
-                        key_s3_label=key_s3_label
+                        key_s3_label=key_s3_label,
+                        bagType=variante
                     )
                     db_session.add(db_img)
                     await db_session.commit()
@@ -285,8 +304,8 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
                 except Exception as err:
                     print(f"Error cleaning up staging files for Frame {img.frame}: {err}")
             
-            print(f"Frame {img.frame} Approved and stored")
-            
+            print(f"Frame {img.frame} ({variante}) Approved and stored")
+
         elif normalized_status in ("rejected", "not_approved", "not_aproved"):
             rejected += 1
             data["status"] = "rejected"
@@ -311,14 +330,27 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
     if has_updates:
         update_pipe.execute()
         
+
     transaction_status = True if (approved + rejected) == total else False
-    task_dir = os.path.join("/staging", taskID)
-    if os.path.exists(task_dir):
+
+    # 1. Clean up staging folder (rendered frames)
+    staging_dir = os.path.join("/staging", taskID)
+    if os.path.exists(staging_dir):
         try:
-            shutil.rmtree(task_dir)
-            print(f"Cleaned up staging folder: {task_dir}")
+            shutil.rmtree(staging_dir)
+            print(f"Cleaned up staging folder: {staging_dir}")
         except Exception as err:
-            print(f"Error cleaning up staging folder {task_dir}: {err}")
+            print(f"Error cleaning up staging folder {staging_dir}: {err}")
+
+    # 2. Clean up extracted model data (.obj/.mtl/textures)
+    data_dir = os.path.join("/app/data", taskID)
+    if os.path.exists(data_dir):
+        try:
+            shutil.rmtree(data_dir)
+            print(f"Cleaned up data folder: {data_dir}")
+        except Exception as err:
+            print(f"Error cleaning up data folder {data_dir}: {err}")
+
     return {
         "task_id": taskID,
         "transaction_status": transaction_status, 
