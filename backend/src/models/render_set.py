@@ -3,6 +3,7 @@ import sqlalchemy.dialects.postgresql as pg
 from sqlalchemy import Column, DateTime
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
+from typing import Optional
 
 
 """
@@ -32,5 +33,5 @@ class RenderSet(SQLModel, table=True):
 
     # Relationships
     pieza: "Pieza" = Relationship(back_populates="render_sets")
-    label: "Label | None" = Relationship(back_populates="render_set")
+    label: Optional["Label"] = Relationship(back_populates="render_set")
     imagenes: list["Imagen"] = Relationship(back_populates="render_set")
