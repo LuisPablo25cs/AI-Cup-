@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Column
 from sqlalchemy import DateTime
 from enum import Enum
+from typing import Optional
 
 class BagVariant(str, Enum):
     SIN_BOLSA = "sin_bolsa"
