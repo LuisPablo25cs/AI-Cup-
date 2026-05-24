@@ -1,0 +1,13 @@
+ultralytics
+boto3
+redis
+fastapi
+uvicorn
+pika
+pillow
+sqlmodel
+asyncpg
+python-dotenv
+python-multipart
+opencv-python-headless
+numpy

@@ -1,9 +1,24 @@
-from sqlmodel import SQLModel, Field, Column, Relationship
+from sqlmodel import SQLModel, Field, Relationship
 import sqlalchemy.dialects.postgresql as pg
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Column as SAColumn
+from sqlalchemy import Column
 from sqlalchemy import DateTime
+from enum import Enum
+
+class BagVariant(str, Enum):
+    SIN_BOLSA = "sin_bolsa"
+    CON_BOLSA_CLEAR = "con_bolsa_clear"
+    CON_BOLSA_OPAQUE = "con_bolsa_opaque"
+
+
+
+"""
+    A single rendered image for one variant (sin_bolsa, con_bolsa_clear, etc.)
+    within a RenderSet.
+    S3 path: piezas/{id_pieza}/{id_render_set}/{variante}.jpg
+    Variants: "sin_bolsa" | "con_bolsa_clear" | "con_bolsa_opaque"
+    """
 
 
 class Imagen(SQLModel, table=True):
@@ -13,23 +28,26 @@ class Imagen(SQLModel, table=True):
         sa_column=Column(pg.UUID, primary_key=True, unique=True, default=uuid4)
     )
 
-    # FK a Pieza
-    id_pieza: UUID = Field(foreign_key="pieza.id_pieza")
+    # FK to the shared render group
+    id_render_set: UUID = Field(foreign_key="render_set.id_render_set", index=True)
+
+    # FK to the shared YOLO annotation (nullable: set once label is confirmed)
+    id_label: UUID | None = Field(
+        default=None,
+        sa_column=Column(pg.UUID, nullable=True, index=True)
+    )
+
+    variante: BagVariant
 
     # S3
-    bucket: str                          # nombre del bucket
-    key_s3: str                          # pieza/{id_pieza}/{uuid}.jpg
-    key_s3_label: str | None = None      # pieza/{id_pieza}/{uuid}.txt
-    bagType : str = "no_bag"             #By default, no bag. 
-    # La URL completa se deriva: f"{bucket}/{key_s3}" — no se guarda en BD
-
-    # Metadatos de imagen
-    width: int | None = None
-    height: int | None = None
-    fecha_captura: datetime = Field(
-    sa_column=SAColumn(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    bucket: str                          # bucket name
+    key_s3: str                          # piezas/{id_pieza}/{id_render_set}/{variante}.jpg
+    # Image metadata
+    created_at: datetime = Field(
+    sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 )
 
 
     # Relationships
-    pieza: "Pieza" = Relationship(back_populates="imagenes")
+    render_set: "RenderSet" = Relationship(back_populates="imagenes")
+    label: "Label | None" = Relationship(back_populates="imagenes")

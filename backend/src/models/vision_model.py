@@ -5,16 +5,10 @@ import sqlalchemy.dialects.postgresql as pg
 from sqlalchemy import Column as SAColumn
 from sqlalchemy import DateTime
 
-class ModelPiezaLink(SQLModel, table=True):
-    __tablename__ = "model_pieza_link"
-    
-    id_model: UUID = Field(
-        sa_column=SAColumn(pg.UUID, primary_key=True, foreign_key="vision_model.id_model")
-    )
-    id_pieza: UUID = Field(
-        sa_column=SAColumn(pg.UUID, primary_key=True, foreign_key="pieza.id_pieza")
-    )
-    class_index: int  # YOLO class index (0, 1, 2, ...)
+
+"""Placeholder VisionModel model class while we figure out the pipeline
+
+"""
 
 class VisionModel(SQLModel, table=True):
     __tablename__ = "vision_model"
@@ -24,12 +18,11 @@ class VisionModel(SQLModel, table=True):
     )
     nombre: str
     version: int = 1
-    estado: str = "QUEUED"  # QUEUED, TRAINING, COMPLETED, FAILED
-    key_s3_weights: str | None = None  # S3 path to the trained best.pt file
+
+    #S3
+    bucket: str
+    key_s3: str  # models/uuid.pt
     
     created_at: datetime = Field(
         sa_column=SAColumn(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    )
-    completed_at: datetime | None = Field(
-        sa_column=SAColumn(DateTime(timezone=True), nullable=True)
     )
