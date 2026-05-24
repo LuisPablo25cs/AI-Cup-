@@ -16,11 +16,13 @@ class Pieza(SQLModel, table=True):
     descripcion: str | None = None
     activo: bool = True
     created_at: datetime = Field(
-    sa_column=SAColumn(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-)
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=SAColumn(DateTime(timezone=True))
+    )
     edited_at: datetime = Field(
-    sa_column=SAColumn(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-)
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=SAColumn(DateTime(timezone=True))
+    )
     # Relationships
 
     #Tiene renders
