@@ -50,4 +50,4 @@ class Imagen(SQLModel, table=True):
 
     # Relationships
     render_set: "RenderSet" = Relationship(back_populates="imagenes")
-    label: "Label | None" = Relationship(back_populates="imagenes")
+    label: Optional["Label"] = Relationship(back_populates="imagenes")
