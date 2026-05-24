@@ -15,25 +15,33 @@ def trainModel():
     """
 
     model = YOLO("yolov8n-seg.pt")
+    path = "path"
     print("modelo cargado")
     #! Revisa los datos
     model.train(
         #Configuración
-        data="datasets/testing/testing.yaml", 
-        epochs=1, 
+        data=str(path), 
+        epochs=100, 
+        patience=15, 
         imgsz=640, 
         project="AI-CUP", 
-        name="test_pipeline_1",
+        freeze=10, 
         #GPU
-        #device=0,
-        #!Dockerizar esto ASAP 
+        device=0,
         #Aumentación de datos
-        erasing=0.4, #Agrega cuadros en negro para que el modelo aprenda a diferenciar 
-        hsv_v=0.25, #Varia la saturación de la imgen (cambio de brillo)
-        degrees=180, 
+        erasing=0.3, #Agrega cuadros en negro para que el modelo aprenda a diferenciar 
+        hsv_v=0.015, #Varia la saturación de la imgen (cambio de brillo)
+        hsv_s=0.7,
+        hsv_v=0.4,
+        degrees=45, 
         translate=0.20, #Que tanto puede mover una imagen para que no se vea por completo
         shear=10, #Dobla la imagen, valores más altos que esto pueden perjudicar más que ayudar. 
-        perspective=0.0025)  #Ayuda a aprender a identificar objetos desde distintas vistas
+        perspective=0.001,
+        mosaic=1.0, 
+        copy_paste=0.1,
+        mixup=0.1,
+        scale=0.5,
+        )  #Ayuda a aprender a identificar objetos desde distintas vistas
     
 
     #? Si eventualmente tenemos varios GPUS agrega device=[0,n] 

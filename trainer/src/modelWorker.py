@@ -1,253 +1,167 @@
 import pika
-import os
-import time
 import json
-import uuid
-import boto3
-import redis
-import shutil
-import random
+import time
+import asyncio
+import logging
+from uuid import UUID
 from pathlib import Path
-from datetime import datetime, timezone
-from ultralytics import YOLO
 
-# Postgres client setup
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import SQLModel, Field, select
+from .config import config
+from .db_client import DBClient
+from .s3_client import S3Client
+from .dataset_builder import DatasetBuilder
+from .model_factory import ModelFactory
+from .tracker import ExperimentTracker
 
-channel = conn.channel()
-#toDo-If you see all of this be very sceptical of how this works, this is only a template
-channel.queue_declare(queue="blender-queue", durable=True)
+logger = logging.getLogger("trainer.worker")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-r = redis.Redis(host="redis", port=6379, db=0)
+class TrainerWorker:
+    def __init__(self):
+        self.db = DBClient()
+        self.s3 = S3Client()
+        self.factory = ModelFactory()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://admin:admin@db:5432/kitting_db")
-ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+    async def _async_pipeline(self, job: dict, tracker: ExperimentTracker) -> None:
+        model_id_str = job["model_id"]
+        model_id = UUID(model_id_str)
+        model_name = job["nombre"]
+        piezas_config = job["piezas"] # list of {"id_pieza": str, "class_index": int}
 
-asyncEngine = create_async_engine(url=ASYNC_DATABASE_URL, echo=False)
-AsyncSessionLocal = async_sessionmaker(asyncEngine, class_=AsyncSession, expire_on_commit=False)
+        # Initialize tracker parameters
+        tracker.start_experiment(model_name, model_id_str)
+        tracker.log_hyperparameters({
+            "base_model": config.BASE_MODEL,
+            "train_epochs": config.TRAIN_EPOCHS,
+            "train_patience": config.TRAIN_PATIENCE,
+            "train_imgsz": config.TRAIN_IMGSZ,
+            "device": config.DEVICE
+        })
 
-# SQLModel lightweight declarations for querying PostgreSQL
-class Pieza(SQLModel, table=True):
-    __tablename__ = "pieza"
-    id_pieza: uuid.UUID = Field(primary_key=True)
-    nombre: str
+        # Step 1: Set database state to PREPARING_DATA
+        logger.info(f"Model {model_id_str}: Updating database status to PREPARING_DATA")
+        await self.db.update_model_status(model_id, "PREPARING_DATA")
 
-class Imagen(SQLModel, table=True):
-    __tablename__ = "imagen"
-    id_imagen: uuid.UUID = Field(primary_key=True)
-    id_pieza: uuid.UUID = Field(foreign_key="pieza.id_pieza")
-    bucket: str
-    key_s3: str
-    key_s3_label: str | None = None
-
-class VisionModel(SQLModel, table=True):
-    __tablename__ = "vision_model"
-    id_model: uuid.UUID = Field(primary_key=True)
-    nombre: str
-    estado: str
-    key_s3_weights: str | None = None
-    completed_at: datetime | None = None
-
-# S3 Setup
-s3_client = boto3.client(
-    "s3",
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    region_name=os.getenv("AWS_REGION")
-)
-BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-
-def connect_rabbitmq(retries=10, delay=5):
-    for attempt in range(retries):
-        try:
-            conn = pika.BlockingConnection(
-                pika.ConnectionParameters(host="rabbitmq")
+        # Step 2: Build dataset
+        logger.info(f"Model {model_id_str}: Assembling and remapping datasets on local disk")
+        dataset_builder = DatasetBuilder(self.s3, config.WORKSPACE_DIR)
+        
+        piece_names = []
+        for p_cfg in piezas_config:
+            piece_uuid = UUID(p_cfg["id_pieza"])
+            class_index = p_cfg["class_index"]
+            
+            piece_name = await self.db.get_piece_name(piece_uuid)
+            samples = await self.db.get_training_samples(piece_uuid)
+            
+            piece_names.append(piece_name)
+            logger.info(f"Piece: '{piece_name}' ({piece_uuid}) has {len(samples)} annotated samples.")
+            
+            dataset_builder.add_piece(
+                piece_id=str(piece_uuid),
+                class_index=class_index,
+                class_name=piece_name,
+                samples=samples
             )
-            print("Connected to RabbitMQ")
-            return conn
+
+        # Download files, remap classes, and save dataset.yaml
+        dataset = dataset_builder.build()
+        tracker.log_dataset_info(dataset)
+        tracker.add_tags(piece_names + ["yolov8-seg"])
+
+        # Step 3: Set database state to TRAINING
+        logger.info(f"Model {model_id_str}: Dataset built successfully. Updating database status to TRAINING.")
+        await self.db.update_model_status(model_id, "TRAINING")
+
+        try:
+            # Step 4: Run training
+            logger.info(f"Model {model_id_str}: Initiating YOLOv8n-seg trainer.")
+            result = self.factory.train(dataset, model_id_str)
+            tracker.log_training_result(result)
+
+            # Step 5: Upload trained weights to S3
+            s3_weights_key = f"models/{model_id_str}/best.pt"
+            logger.info(f"Model {model_id_str}: Uploading best.pt weights to S3 key '{s3_weights_key}'...")
+            self.s3.upload_file(result.best_weights, s3_weights_key)
+
+            # Step 6: Mark database status as COMPLETED
+            await self.db.update_model_status(model_id, "COMPLETED", s3_weights_key)
+            logger.info(f"Model {model_id_str}: Status updated to COMPLETED.")
+
+        finally:
+            # Ensure local disk cleanup executes under all circumstances
+            logger.info(f"Model {model_id_str}: Cleaning up dataset cache directory.")
+            dataset.cleanup()
+
+    def process_job(self, job: dict) -> None:
+        """Runs the async pipeline from a synchronous consumer frame."""
+        tracker = ExperimentTracker()
+        try:
+            asyncio.run(self._async_pipeline(job, tracker))
+            tracker.end_experiment()
         except Exception as e:
-            print(f"RabbitMQ not ready ({attempt+1}/{retries}), retrying in {delay}s...")
-            time.sleep(delay)
-    raise Exception("Could not connect to RabbitMQ after retries")
+            logger.error(f"Pipeline error occurred during training model {job.get('model_id')}: {e}", exc_info=True)
+            tracker.log_failure(e)
+            tracker.end_experiment()
+            
+            # Safely attempt database correction to FAILED state
+            try:
+                model_uuid = UUID(job["model_id"])
+                asyncio.run(self.db.update_model_status(model_uuid, "FAILED"))
+            except Exception as db_err:
+                logger.error(f"Could not update model state to FAILED in database: {db_err}")
 
-async def update_model_status(model_id: uuid.UUID, status: str, s3_key: str | None = None):
-    async with AsyncSessionLocal() as session:
-        model = await session.get(VisionModel, model_id)
-        if model:
-            model.estado = status
-            if s3_key:
-                model.key_s3_weights = s3_key
-                model.completed_at = datetime.now(timezone.utc)
-            session.add(model)
-            await session.commit()
-            print(f"VisionModel {model_id} updated to {status}")
-
-async def run_training_pipeline(model_id: uuid.UUID, model_name: str, pieces: list):
-    dataset_dir = Path(f"/app/dataset_{model_id}")
-    images_train_dir = dataset_dir / "images" / "train"
-    images_val_dir = dataset_dir / "images" / "val"
-    labels_train_dir = dataset_dir / "labels" / "train"
-    labels_val_dir = dataset_dir / "labels" / "val"
-
-    # Create directory tree
-    images_train_dir.mkdir(parents=True, exist_ok=True)
-    images_val_dir.mkdir(parents=True, exist_ok=True)
-    labels_train_dir.mkdir(parents=True, exist_ok=True)
-    labels_val_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        await update_model_status(model_id, "TRAINING")
-        
-        class_names = {}
-        all_samples = []
-
-        # 1. Fetch images and labels from S3
-        async with AsyncSessionLocal() as session:
-            for piece_info in pieces:
-                p_id = uuid.UUID(piece_info["id_pieza"])
-                class_idx = piece_info["class_index"]
-                
-                # Get piece metadata to fill names in dataset.yaml
-                piece_obj = await session.get(Pieza, p_id)
-                class_names[class_idx] = piece_obj.nombre if piece_obj else f"class_{class_idx}"
-
-                # Query database for all images linked to this Piece
-                stmt = select(Imagen).where(Imagen.id_pieza == p_id)
-                images_query = await session.exec(stmt)
-                images = images_query.all()
-                print(f"Piece {class_names[class_idx]} has {len(images)} images.")
-
-                for img in images:
-                    if not img.key_s3_label:
-                        print(f"Skipping image {img.id_imagen} because it has no S3 label.")
-                        continue
-                    
-                    all_samples.append({
-                        "id": str(img.id_imagen),
-                        "key_s3": img.key_s3,
-                        "key_s3_label": img.key_s3_label,
-                        "class_index": class_idx
-                    })
-
-        if not all_samples:
-            raise Exception("No annotated images found for the selected pieces.")
-
-        # Shuffle and split into Train (80%) and Val (20%)
-        random.shuffle(all_samples)
-        split_idx = int(len(all_samples) * 0.8)
-        train_samples = all_samples[:split_idx]
-        val_samples = all_samples[split_idx:]
-
-        def download_and_format(samples, is_train: bool):
-            target_img_dir = images_train_dir if is_train else images_val_dir
-            target_lbl_dir = labels_train_dir if is_train else labels_val_dir
-
-            for sample in samples:
-                local_img_path = target_img_dir / f"{sample['id']}.jpg"
-                local_lbl_path = target_lbl_dir / f"{sample['id']}.txt"
-
-                # Download Image
-                s3_client.download_file(BUCKET_NAME, sample["key_s3"], str(local_img_path))
-                
-                # Download and dynamically format YOLO annotation with corrected class index
-                temp_lbl_path = target_lbl_dir / f"temp_{sample['id']}.txt"
-                s3_client.download_file(BUCKET_NAME, sample["key_s3_label"], str(temp_lbl_path))
-                
-                # Rewrite class indices in the annotation label
-                with open(temp_lbl_path, "r") as f:
-                    lines = f.readlines()
-                
-                new_lines = []
-                for line in lines:
-                    parts = line.strip().split()
-                    if parts:
-                        parts[0] = str(sample["class_index"])
-                        new_lines.append(" ".join(parts) + "\n")
-                
-                with open(local_lbl_path, "w") as f:
-                    f.writelines(new_lines)
-                
-                temp_lbl_path.unlink()
-
-        # Download train/val splits
-        print("Downloading training split...")
-        download_and_format(train_samples, is_train=True)
-        print("Downloading validation split...")
-        download_and_format(val_samples, is_train=False)
-
-        # 2. Create dataset.yaml
-        yaml_content = f"""
-path: {dataset_dir}
-train: images/train
-val: images/val
-names:
-"""
-        for class_idx, name in class_names.items():
-            yaml_content += f"  {class_idx}: {name}\n"
-
-        yaml_path = dataset_dir / "dataset.yaml"
-        with open(yaml_path, "w") as f:
-            f.write(yaml_content)
-
-        # 3. Train YOLO Model (using a fast, robust 5 epochs for testing)
-        print("Initializing YOLO segmentation training...")
-        model = YOLO("yolov8n-seg.pt")
-        
-        # Train model
-        model.train(
-            data=str(yaml_path),
-            epochs=5,
-            imgsz=640,
-            project=str(dataset_dir / "runs"),
-            name="train"
+    def start_consuming(self) -> None:
+        """RabbitMQ continuous connection listener with automated connection recovery."""
+        connection_params = pika.ConnectionParameters(
+            host=config.RABBITMQ_HOST,
+            heartbeat=600,                    # Keeps connections alive during intensive training
+            blocked_connection_timeout=300
         )
 
-        # 4. Upload best weights back to S3
-        best_weights_path = dataset_dir / "runs" / "train" / "weights" / "best.pt"
-        if not best_weights_path.exists():
-            raise Exception("Training finished but weights file was not generated.")
+        while True:
+            try:
+                logger.info(f"Connecting to RabbitMQ broker at host '{config.RABBITMQ_HOST}'...")
+                connection = pika.BlockingConnection(connection_params)
+                channel = connection.channel()
+                
+                # Assert queue parameters
+                channel.queue_declare(queue=config.RABBITMQ_QUEUE, durable=True)
+                channel.basic_qos(prefetch_count=1)
+                
+                logger.info(f"Queue '{config.RABBITMQ_QUEUE}' locked. Consumer active and listening...")
+                
+                def on_message(ch, method, properties, body):
+                    try:
+                        logger.info("Acquired a new model training job.")
+                        job = json.loads(body.decode("utf-8"))
+                        self.process_job(job)
+                    except Exception as parse_err:
+                        logger.error(f"Unable to parse message payload: {parse_err}")
+                    finally:
+                        # Secure ACK boundary
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+                        logger.info("Message acknowledged.")
 
-        s3_key_weights = f"models/{model_id}/best.pt"
-        print(f"Uploading best weights to S3: {s3_key_weights}")
-        s3_client.upload_file(str(best_weights_path), BUCKET_NAME, s3_key_weights)
+                channel.basic_consume(
+                    queue=config.RABBITMQ_QUEUE,
+                    on_message_callback=on_message
+                )
+                channel.start_consuming()
 
-        # 5. Mark Model completed in Postgres
-        await update_model_status(model_id, "COMPLETED", s3_key=s3_key_weights)
-
-    except Exception as e:
-        print(f"Training failed: {e}")
-        await update_model_status(model_id, "FAILED")
-    finally:
-        # 6. Clean up temporary files on disk
-        if dataset_dir.exists():
-            shutil.rmtree(dataset_dir)
-
-def on_training_job(ch, method, properties, body):
-    job = json.loads(body)
-    model_id = uuid.UUID(job["model_id"])
-    model_name = job["nombre"]
-    pieces = job["piezas"]
-
-    print(f"Received training request: {model_name} (ID: {model_id})")
-    
-    # Send acknowledgment immediately to prevent RabbitMQ heartbeats from timing out during long training
-    ch.basic_ack(delivery_tag=method.delivery_tag)
-    
-    # Run the training logic synchronously inside python thread
-    import asyncio
-    asyncio.run(run_training_pipeline(model_id, model_name, pieces))
+            except pika.exceptions.AMQPConnectionError as conn_err:
+                logger.warning(f"RabbitMQ connection failed: {conn_err}. Re-establishing in 10 seconds...")
+                time.sleep(10)
+            except KeyboardInterrupt:
+                logger.info("Worker manual interrupt shutdown triggered.")
+                break
+            except Exception as e:
+                logger.critical(f"Critical Worker runtime crash: {e}. Restarting daemon in 10 seconds...", exc_info=True)
+                time.sleep(10)
 
 def main():
-    conn = connect_rabbitmq()
-    channel = conn.channel()
-    channel.queue_declare(queue="trainer-queue", durable=True)
-    channel.basic_qos(prefetch_count=1)
-    
-    print("Trainer Consumer is ready and waiting for jobs...")
-    channel.basic_consume(queue="trainer-queue", on_message_callback=on_training_job)
-    channel.start_consuming()
+    worker = TrainerWorker()
+    worker.start_consuming()
 
 if __name__ == "__main__":
     main()
