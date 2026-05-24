@@ -16,18 +16,18 @@ BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 
 """
     Sube imagen a S3 y retorna (bucket, key_s3)
-    S3 path: piezas/{id_pieza}/{id_render_set}/{variante}.jpg
+    S3 path: piezas/{id_pieza}/{frame_set}/{variante}.jpg
 """
 
 def upload_imagen(
         file_bytes: bytes,
         id_pieza: str,
-        id_render_set: str,
+        frame_name: str, #(fondo_perfil_vista)
         variante: BagVariant, 
         content_type: str = "image/jpeg") -> tuple[str, str]:
 
     #TO DO: capaz que el nombre no sea variante si no un uuid
-    key = f"piezas/{id_pieza}/{id_render_set}/{variante}.jpg"
+    key = f"piezas/{id_pieza}/{frame_name}/{variante}.jpg"
 
     s3_client.put_object(
         Bucket=BUCKET_NAME,
