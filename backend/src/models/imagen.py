@@ -35,7 +35,9 @@ class Imagen(SQLModel, table=True):
     # FK to the shared YOLO annotation (nullable: set once label is confirmed)
     id_label: UUID | None = Field(
         default=None,
-        sa_column=Column(pg.UUID, nullable=True, index=True)
+        foreign_key="label.id_label",
+        nullable=True,
+        index=True
     )
 
     variante: BagVariant
