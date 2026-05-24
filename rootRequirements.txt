@@ -11,3 +11,4 @@ python-dotenv
 python-multipart
 opencv-python-headless
 numpy
+comet_ml
