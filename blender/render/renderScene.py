@@ -59,7 +59,7 @@ BAG_REGISTRY = {
         "scale_padding": 0.75,
         "height_extra":  1.5,
         "subdivisions":  30,
-        "shrinkwrap_offset": 0.9,
+        "shrinkwrap_offset": 0.02,
         "cloth_mass":    0.02,
         "tension":       50,
         "compression":   50,
@@ -85,7 +85,7 @@ BAG_REGISTRY = {
         "scale_padding": 0.75,
         "height_extra":  1.5,
         "subdivisions":  30,
-        "shrinkwrap_offset": 0.9,
+        "shrinkwrap_offset": 0.02,
         "cloth_mass":    0.03,
         "tension":       60,
         "compression":   60,
@@ -478,7 +478,7 @@ def crear_bolsa(obj_target, config):
     print(f"   Simulando {sim_frames} frames...")
     for frame in range(1, sim_frames + 1):
         scene.frame_set(frame)
-        bpy.context.view_layer.update()
+        bpy.context.evaluated_depsgraph_get()
         if frame % 15 == 0:
             print(f"   Frame {frame}/{sim_frames}...")
 

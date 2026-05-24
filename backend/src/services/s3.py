@@ -45,10 +45,13 @@ def upload_imagen(
     y retorna (bucket, key_s3_label)
     S3 path: piezas/{id_pieza}/{id_render_set}/label.txt
 """
+
 def upload_label(
         file_bytes: bytes,
         id_pieza: str,
-        id_render_set: str) -> tuple[str, str]:
+        id_render_set: str,
+        content_type:str = "text/plain",
+        ) -> tuple[str, str]:
 
     key = f"piezas/{id_pieza}/{id_render_set}/label.txt" 
 
@@ -56,10 +59,11 @@ def upload_label(
         Bucket=BUCKET_NAME,
         Key=key,
         Body=file_bytes,
-        ContentType="text/plain"
+        ContentType=content_type
     )
 
     return BUCKET_NAME, key
+
 
 """
     Sube modelo de vision ed YOLO a S3 y retorna (bucket, key_s3)
