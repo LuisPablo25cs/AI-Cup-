@@ -31,5 +31,6 @@ class RenderSet(SQLModel, table=True):
     )
 
     # Relationships
+    render_sets: list["RenderSet"] = Relationship(back_populates="pieza")
     label: "Label | None" = Relationship(back_populates="render_set")
     imagenes: list["Imagen"] = Relationship(back_populates="render_set")

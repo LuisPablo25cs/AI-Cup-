@@ -22,4 +22,6 @@ class Pieza(SQLModel, table=True):
     sa_column=SAColumn(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 )
     # Relationships
-    imagenes: list["Imagen"] = Relationship(back_populates="pieza")
+
+    #Tiene renders
+    render_sets: list["RenderSet"] = Relationship(back_populates="pieza")
