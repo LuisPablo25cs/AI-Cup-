@@ -1,29 +1,91 @@
 services:  
-  rabbitmq:
-    container_name: rabbitmq
-    image: 'rabbitmq:3-management'
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    healthcheck: 
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks: 
-      - app-network
-  redis:
-    container_name: redis
-    image: 'redis:alpine'
-    ports:
-    - "6379:6379"
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+  ai-tool-a:
+    build:
+      context: ./anotation        
+      dockerfile: Dockerfile
+    container_name: industrial_vision_tester
+    environment:
+      - CUDA_VISIBLE_DEVICES=1
+      - CUDA_HOME=/usr/local/cuda
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis: 
+        condition: service_started
     volumes:
-      - redis-data:/data
-    networks: 
+      - ./anotation/dinoWorker.py:/app/dinoWorker.py
+      - ./anotation/datasets:/app/datasets
+      - ./blender/staging:/staging
+    deploy:
+      replicas: 4
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
+    networks:
       - app-network
-  blender-tool:
-    container_name: auto-photo-taker-3000
+  
+  ai-tool-b:
+    build:
+      context: ./anotation        
+      dockerfile: Dockerfile
+    container_name: industrial_vision_tester
+    environment:
+      - CUDA_VISIBLE_DEVICES=1
+      - CUDA_HOME=/usr/local/cuda
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis: 
+        condition: service_started
+    volumes:
+      - ./anotation/dinoWorker.py:/app/dinoWorker.py
+      - ./anotation/datasets:/app/datasets
+      - ./blender/staging:/staging
+    deploy:
+      replicas: 4
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
+    networks:
+      - app-network
+  backend_server:
+    build:
+      context: ./backend           
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
+      - temp-data:/app/data
+      - ./blender/staging:/staging
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env             
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - app-network
+
+  blender-tool-a:
     build: 
       context: ./blender
       dockerfile: Dockerfile
@@ -31,7 +93,7 @@ services:
       - STAGING_PATH=/staging
       - TZ=America/Hermosillo
       - PYTHONUNBUFFERED=1
-      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
       - CUDA_HOME=/usr/local/cuda
     volumes:
       - ./blender/scenes:/scenes       
@@ -47,43 +109,64 @@ services:
       redis: 
         condition: service_started
     deploy: 
+      replicas: 2
       resources: 
         reservations: 
           devices: 
             - driver: nvidia
-              count: 1
+              device_ids: ['0']
               capabilities: [gpu]
     networks:
       - app-network
 
-  ai-tool:
-    build:
-      context: ./anotation        
+  blender-tool-b:
+    build: 
+      context: ./blender
       dockerfile: Dockerfile
-    container_name: industrial_vision_tester
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
+      - STAGING_PATH=/staging
+      - TZ=America/Hermosillo
+      - PYTHONUNBUFFERED=1
+      - CUDA_VISIBLE_DEVICES=1
       - CUDA_HOME=/usr/local/cuda
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      rabbitmq:
+    volumes:
+      - ./blender/scenes:/scenes       
+      - ./blender/staging:/staging
+      - temp-data:/app/data
+      - ./blender/blenderWorker.py:/app/blenderWorker.py
+      - ./blender/render:/app/render      
+
+    restart: unless-stopped
+    depends_on: 
+      rabbitmq: 
         condition: service_healthy
       redis: 
         condition: service_started
-    volumes:
-      - ./anotation/dinoWorker.py:/app/dinoWorker.py
-      - ./anotation/datasets:/app/datasets
-      - ./blender/staging:/staging
-    deploy:
-      resources:
-        reservations:
-          devices:
+    deploy: 
+      replicas: 2
+      resources: 
+        reservations: 
+          devices: 
             - driver: nvidia
-              count: 1
+              device_ids: ['1']
               capabilities: [gpu]
-    stdin_open: true
-    tty: true
+    networks:
+      - app-network
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: kitting_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d kitting_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - app-network
   model_tool:
@@ -94,7 +177,7 @@ services:
     env_file:
       - .env
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=2
       - CUDA_HOME=/usr/local/cuda
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REDIS_URL=redis://redis:6379
@@ -120,53 +203,36 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ['2']
               capabilities: [gpu]
     stdin_open: true
     tty: true
     restart: always
     networks:
       - app-network
-  backend_server:
-    build:
-      context: ./backend           
-      dockerfile: Dockerfile
-    volumes:
-      - ./backend:/app
-      - temp-data:/app/data
-      - ./blender/staging:/staging
+  rabbitmq:
+    container_name: rabbitmq
+    image: 'rabbitmq:3-management'
     ports:
-      - "8000:8000"
-    env_file:
-      - .env             
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-    depends_on:
-      db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    networks:
-      - app-network
-  db:
-    image: postgres:16-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: kitting_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d kitting_db"]
-      interval: 5s
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck: 
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
       timeout: 5s
       retries: 5
-    networks:
+    networks: 
       - app-network
-
+  redis:
+    container_name: redis
+    image: 'redis:alpine'
+    ports:
+    - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks: 
+      - app-network
 networks:
   app-network:
     driver: bridge
