@@ -3,7 +3,6 @@ services:
     build:
       context: ./anotation        
       dockerfile: Dockerfile
-    container_name: industrial_vision_tester
     environment:
       - CUDA_VISIBLE_DEVICES=1
       - CUDA_HOME=/usr/local/cuda
@@ -35,7 +34,6 @@ services:
     build:
       context: ./anotation        
       dockerfile: Dockerfile
-    container_name: industrial_vision_tester
     environment:
       - CUDA_VISIBLE_DEVICES=1
       - CUDA_HOME=/usr/local/cuda
