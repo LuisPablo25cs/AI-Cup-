@@ -72,7 +72,7 @@ def annotate_segmentation(image_source, masks, alpha=0.5):
     annotated_image = image_source.copy()
     overlay = annotated_image.copy()
     for i, mask in enumerate(masks):
-        color = np.random.randint(50, 255, size=3).tolist()
+        color = [255, 102, 102]
         mask_np = mask.squeeze().cpu().numpy().astype(np.uint8)
         contours, _ = cv2.findContours(mask_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(overlay, contours, -1, color, -1)
