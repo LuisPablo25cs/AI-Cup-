@@ -62,10 +62,10 @@ Definition of Done (S2): list endpoint supports `kit_id/resultado_general/fecha_
 
 ## Slice S4 — Frontend wire inspections/history (delete mocks)
 
-- [ ] 4.1 Frontend: rewire `ai-kitting-frontend/src/pages/HistoryPage.tsx` to `inspectionsApi.list(filters)` via TanStack Query (design §3.3).
-- [ ] 4.2 Frontend: rewire `ai-kitting-frontend/src/pages/InspectionPage.tsx` to submit multipart to `/api/inspections` via `inspectionsApi.submit` and navigate on success.
-- [ ] 4.3 Frontend: update `ai-kitting-frontend/src/components/history/HistoryFilters.tsx` to use server-side filters (string IDs already).
-- [ ] 4.4 Frontend: delete mock modules `ai-kitting-frontend/src/mocks/{history.ts,inspectionResult.ts,data.ts}` and remove imports.
+- [x] 4.1 Frontend: rewire `ai-kitting-frontend/src/pages/HistoryPage.tsx` to `inspectionsApi.list(filters)` via TanStack Query (design §3.3).
+- [ ] 4.2 Frontend: rewire `ai-kitting-frontend/src/pages/InspectionPage.tsx` to submit multipart to `/api/inspections` via `inspectionsApi.submit` and navigate on success. **Implemented client-side multipart call shape and success handling; end-to-end submit remains blocked until S5 exposes `POST /api/inspections`.**
+- [x] 4.3 Frontend: update `ai-kitting-frontend/src/components/history/HistoryFilters.tsx` to use server-side filters (string IDs already).
+- [x] 4.4 Frontend: delete mock modules `ai-kitting-frontend/src/mocks/{history.ts,inspectionResult.ts,data.ts}` and remove imports.
 
 Definition of Done (S4): submitting an inspection shows a persisted result in HistoryPage; no mock imports remain; UI works with real backend history filters.
 
