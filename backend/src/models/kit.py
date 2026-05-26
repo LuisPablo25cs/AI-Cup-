@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from sqlmodel import SQLModel, Field, Relationship
 import sqlalchemy.dialects.postgresql as pg
 from sqlalchemy import Column as SAColumn, DateTime, ForeignKey, UniqueConstraint
