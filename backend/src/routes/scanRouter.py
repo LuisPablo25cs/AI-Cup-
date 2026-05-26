@@ -78,7 +78,11 @@ async def publishNewPiece(
         r.setex(f"status:{taskID}", 864000, "QUEUED")
         
         connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host=RABBITMQ_HOST)
+            pika.ConnectionParameters(
+                host="rabbitmq",
+                connection_attempts=3,
+                retry_delay=2
+            )
         )
         channel = connection.channel()
         channel.queue_declare(queue="blender-queue", durable=True)
