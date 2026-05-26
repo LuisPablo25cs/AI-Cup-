@@ -52,11 +52,11 @@ Definition of Done (S3): app compiles; CreateKitPage creates a kit using real ba
 
 ## Slice S2 — Backend inspections (Inspeccion+Deteccion models + inspeccionRouter CRUD+filters + imagen_s3_key nullable)
 
-- [ ] 2.1 Backend: create SQLModel schemas `Inspeccion` + `Deteccion` in `AI-Cup-/backend/src/models/inspeccion.py` (design §2.1, specs inspections).
-- [ ] 2.2 Backend: create `AI-Cup-/backend/src/routes/inspeccionRouter.py` with `GET /api/inspections` list + filters and `GET /{id}` detail (design §2.2, specs scenarios).
-- [ ] 2.3 Backend: implement `GET /{id}/result` returning `InspeccionResultRead` shape for UI result page.
-- [ ] 2.4 Backend: implement `POST /{id}/confirm` applying corrections (set `corregido_por_operador=true`, validate deteccion belongs to inspection).
-- [ ] 2.5 Backend: mount `inspeccionRouter` and import new models for `create_all` in `AI-Cup-/backend/src/main.py` + `AI-Cup-/backend/src/db.py`.
+- [x] 2.1 Backend: create SQLModel schemas `Inspeccion` + `Deteccion` in `AI-Cup-/backend/src/models/inspeccion.py` (design §2.1, specs inspections).
+- [x] 2.2 Backend: create `AI-Cup-/backend/src/routes/inspeccionRouter.py` with `GET /api/inspections` list + filters and `GET /{id}` detail (design §2.2, specs scenarios).
+- [x] 2.3 Backend: implement `GET /{id}/result` returning `InspeccionResultRead` shape for UI result page.
+- [x] 2.4 Backend: implement `POST /{id}/confirm` applying corrections (set `corregido_por_operador=true`, validate deteccion belongs to inspection).
+- [x] 2.5 Backend: mount `inspeccionRouter` and import new models for `create_all` in `AI-Cup-/backend/src/main.py` + `AI-Cup-/backend/src/db.py`.
 
 Definition of Done (S2): list endpoint supports `kit_id/resultado_general/fecha_desde/fecha_hasta/operador` filters without 500s; detail+result+confirm return 404/422 correctly per spec; `imagen_s3_key` persists as NULL.
 
