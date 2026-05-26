@@ -1,0 +1,164 @@
+schema: spec-driven
+initialized: 2026-05-24
+
+# ── Project Context ──────────────────────────────────────────────────────────
+context: |
+  Monorepo: kitting-inspection (two sibling repos, one workspace root)
+  Backend:  AI-Cup-/backend/ — Python 3.12, FastAPI, SQLModel, PostgreSQL 16,
+            Redis, RabbitMQ, S3 (boto3), Uvicorn. Entry: src/main.py.
+  Frontend: ai-kitting-frontend/ — React 18, TypeScript 5.6, Vite 6, Tailwind 3,
+            TanStack Query 5, Zustand 4, Radix UI. Express sidecar server.js → port 3001
+            (Claude Vision proxy — temporary, to be replaced by backend CV pipeline).
+  SDD home: AI-Cup-/openspec/ (backend repo owns architectural truth).
+  Architecture: monolithic FastAPI; frontend is API consumer.
+  DB migrations: SQLModel auto-create (create_all) — NO Alembic.
+  Package manager: npm (package-lock.json present).
+
+# ── Execution Mode ───────────────────────────────────────────────────────────
+execution_mode: interactive
+artifact_store: openspec
+delivery_strategy: ask-on-risk
+review_budget_lines: 400
+
+# ── Testing Capabilities ─────────────────────────────────────────────────────
+testing:
+  backend:
+    strict_tdd: false
+    runner: null
+    note: >
+      No pytest config (pytest.ini / pyproject.toml / setup.cfg) found in
+      backend/. Only smoke test found in blender/tests/ (headless subprocess,
+      not a pytest suite). Recommend adding pytest + httpx + pytest-asyncio
+      before enabling strict_tdd.
+    layers:
+      unit: false
+      integration: false
+      e2e: false
+    coverage: false
+    linter: null
+    formatter: null
+    type_checker: null
+  frontend:
+    strict_tdd: false
+    runner: null
+    note: >
+      No vitest, jest, or any test runner in package.json scripts or devDependencies.
+      msw 2.x is installed (mock service worker — test infra ready) but no test
+      runner configured yet. Recommend adding vitest + @testing-library/react.
+    layers:
+      unit: false
+      integration: false
+      e2e: false
+    coverage: false
+    linter: eslint
+    linter_command: "eslint ."
+    formatter: null
+    type_checker: typescript
+    typecheck_command: "tsc -b"
+
+# ── Phase Rules ───────────────────────────────────────────────────────────────
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Flag integration-boundary changes (CORS, ID types, proxy routing)
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Separate backend and frontend spec files per domain
+  design:
+    - Include sequence diagrams for cross-service flows
+    - Document ID-type decisions (UUID vs number) explicitly
+    - Note CORS policy for every new endpoint
+  tasks:
+    - Group by project (backend / frontend), then by phase
+    - Use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    - Follow existing file/router naming conventions (XxxRouter.py, xxxxxApi.ts)
+    - No Alembic — SQLModel create_all handles schema; document DDL changes
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: "tsc -b && vite build"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+    - Keep integration-risk notes visible in archived proposals
+
+# ── Known Integration Risks (pre-loaded for all phases) ──────────────────────
+integration_risks:
+  - id: IR-001
+    title: No CORS middleware on backend
+    severity: high
+    detail: >
+      FastAPI app has no CORSMiddleware. Works today only because Vite proxy
+      rewrites /backend → localhost:8000 in dev. Any direct browser-to-backend
+      call (production, mobile, Swagger UI) will be blocked by CORS policy.
+    affected: [backend/src/main.py]
+
+  - id: IR-002
+    title: Hardcoded Docker service names
+    severity: medium
+    detail: >
+      redis.Redis(host="redis") and pika.ConnectionParameters(host="rabbitmq")
+      are hardcoded in main.py. Local dev without Docker fails silently on
+      startup. Must be read from env vars.
+    affected: [backend/src/main.py]
+
+  - id: IR-003
+    title: ID type mismatch — UUID (backend) vs number (frontend)
+    severity: high
+    detail: >
+      Backend Pieza.id_pieza is UUID (PostgreSQL native). Frontend src/api/types.ts
+      declares KitPieza.id_pieza as number and Kit.id_kit as number. backend.ts
+      correctly uses string for BackendPieza.id_pieza but domain types.ts has
+      not been updated. Kit and Inspeccion entities have no backend counterpart
+      yet; their id fields will need UUID strings when endpoints are built.
+    affected: [ai-kitting-frontend/src/api/types.ts, ai-kitting-frontend/src/api/kits.ts]
+
+  - id: IR-004
+    title: Frontend base URLs hardcoded, no import.meta.env usage
+    severity: medium
+    detail: >
+      API_BASE is hardcoded to '/api' in src/lib/constants.ts and BACKEND_BASE
+      to '/backend' in src/api/backend.ts. No VITE_* env vars used. Production
+      deployments require externalizing these via import.meta.env.
+    affected: [ai-kitting-frontend/src/lib/constants.ts, ai-kitting-frontend/src/api/backend.ts]
+
+  - id: IR-005
+    title: Vite proxy is dev-only — no production routing strategy
+    severity: medium
+    detail: >
+      /api → :3001 and /backend → :8000 proxying exists only in vite dev server.
+      Production build has no equivalent. Need nginx/caddy config or backend
+      consolidation before deployment.
+    affected: [ai-kitting-frontend/vite.config.ts]
+
+  - id: IR-006
+    title: Express sidecar (server.js) is a temporary Claude Vision proxy
+    severity: medium
+    detail: >
+      server.js implements POST /api/inspect via Anthropic Claude Vision API.
+      This is explicitly temporary; the real CV pipeline is the backend YOLO
+      inference stack. Migration plan: build /inspect endpoint in FastAPI, then
+      remove server.js and update /api proxy to point to :8000.
+    affected: [ai-kitting-frontend/server.js]
+
+  - id: IR-007
+    title: Kit and Inspeccion entities have no backend CRUD endpoints yet
+    severity: high
+    detail: >
+      Frontend src/api/kits.ts and inspections.ts call /kits, /inspections
+      endpoints that DO NOT EXIST in the backend. Frontend uses mock data
+      (src/mocks/) for these. The integration task is building these endpoints.
+    affected: [ai-kitting-frontend/src/api/kits.ts, ai-kitting-frontend/src/api/inspections.ts, backend/src/routes/]
+
+  - id: IR-008
+    title: No database migration tool — SQLModel create_all only
+    severity: medium
+    detail: >
+      db.py uses SQLModel.metadata.create_all at startup. This is safe for
+      greenfield but will not run ALTER TABLE for schema changes. Any change to
+      existing table columns requires manual migration or Alembic setup.
+    affected: [backend/src/db.py]

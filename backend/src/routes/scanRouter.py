@@ -13,6 +13,8 @@ from src.core.config import r, fileTypes
 
 router = APIRouter(prefix="/3D-scans", tags=["3D Scans"])
 
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+
 @router.post("/publishNewPiece")
 async def publishNewPiece(
     prompt: str = Form(), 
@@ -75,7 +77,9 @@ async def publishNewPiece(
         r.setex(f"path:{taskID}", 864000, path)
         r.setex(f"status:{taskID}", 864000, "QUEUED")
         
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=RABBITMQ_HOST)
+        )
         channel = connection.channel()
         channel.queue_declare(queue="blender-queue", durable=True)
         channel.basic_publish(
