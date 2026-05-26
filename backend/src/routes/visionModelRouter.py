@@ -1,5 +1,6 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from typing import List
+import os
 import pika
 import json
 import uuid
@@ -16,6 +17,8 @@ class GenerateModelRequest(BaseModel):
     piezas: List[uuid.UUID]
 
 router = APIRouter(tags=["Vision Models"])
+
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 
 @router.post("/generateModel")
 async def generateModel(request: GenerateModelRequest):
@@ -44,7 +47,9 @@ async def generateModel(request: GenerateModelRequest):
         await db_session.commit()
 
         # 4. Publish training job payload to RabbitMQ
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host="rabbitmq"))
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=RABBITMQ_HOST)
+        )
         channel = connection.channel()
         channel.queue_declare(queue="trainer-queue", durable=True)
         channel.basic_publish(

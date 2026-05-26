@@ -1,7 +1,9 @@
+import os
 import redis
 
 # Shared Redis connection
-r = redis.Redis(host="redis", port=6379, db=0)
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+r = redis.Redis(host=REDIS_HOST, port=6379, db=0)
 
 # Shared file types for validation
 fileTypes = [
