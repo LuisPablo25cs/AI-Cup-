@@ -4,7 +4,7 @@ services:
       context: ./anotation        
       dockerfile: Dockerfile
     environment:
-      - CUDA_VISIBLE_DEVICES=1
+      - CUDA_VISIBLE_DEVICES=0
       - CUDA_HOME=/usr/local/cuda
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REDIS_URL=redis://redis:6379
@@ -35,7 +35,7 @@ services:
       context: ./anotation        
       dockerfile: Dockerfile
     environment:
-      - CUDA_VISIBLE_DEVICES=1
+      - CUDA_VISIBLE_DEVICES=0
       - CUDA_HOME=/usr/local/cuda
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REDIS_URL=redis://redis:6379
@@ -71,7 +71,9 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env             
+      - .env  
+    environment: 
+      - REDIS_HOST=redis           
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       db:
@@ -125,7 +127,7 @@ services:
       - STAGING_PATH=/staging
       - TZ=America/Hermosillo
       - PYTHONUNBUFFERED=1
-      - CUDA_VISIBLE_DEVICES=1
+      - CUDA_VISIBLE_DEVICES=0
       - CUDA_HOME=/usr/local/cuda
     volumes:
       - ./blender/scenes:/scenes       
