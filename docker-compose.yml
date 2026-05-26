@@ -98,6 +98,14 @@ services:
       - CUDA_HOME=/usr/local/cuda
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REDIS_URL=redis://redis:6379
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - COMET_API_KEY=${COMET_API_KEY}
+      - COMET_PROJECT_NAME=AI-CUP
+      - TRAIN_EPOCHS=100
+      - TRAIN_DEGREES=180.0
     depends_on:
       db:
         condition: service_healthy
@@ -116,6 +124,7 @@ services:
               capabilities: [gpu]
     stdin_open: true
     tty: true
+    restart: always
     networks:
       - app-network
   backend_server:
