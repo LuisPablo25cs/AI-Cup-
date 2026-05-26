@@ -7,6 +7,7 @@ from .models.imagen import Imagen
 from .models.render_set import RenderSet
 from .models.vision_model import VisionModel
 from .models.label import Label
+from .models.kit import Kit, KitPiezaLink
 
 #Database settings
 DATABASE_URL = os.getenv("DATABASE_URL")

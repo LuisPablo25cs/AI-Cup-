@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field as PydField
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+from uuid import UUID
+from datetime import datetime
+
+from src.db import get_session
+from src.models.kit import Kit, KitPiezaLink
+from src.models.pieza import Pieza
+from src.models.vision_model import VisionModel
+
+
+router = APIRouter(prefix="/api/kits", tags=["Kits"])
+
+
+class KitItemCreate(BaseModel):
+    pieza_id: UUID
+    cantidad_requerida: int = PydField(default=1, gt=0)
+    pos_x: float | None = None
+    pos_y: float | None = None
+    ancho_cm: float | None = None
+    alto_cm: float | None = None
+    icono: str | None = None
+    es_agrupacion: bool = False
+
+
+class KitItemUpdate(BaseModel):
+    cantidad_requerida: int | None = PydField(default=None, gt=0)
+    pos_x: float | None = None
+    pos_y: float | None = None
+    ancho_cm: float | None = None
+    alto_cm: float | None = None
+    icono: str | None = None
+    es_agrupacion: bool | None = None
+
+
+class KitCreate(BaseModel):
+    nombre: str
+    descripcion: str | None = None
+    activo: bool = True
+    ancho_cm: float | None = None
+    largo_cm: float | None = None
+    imagen_url: str | None = None
+    vision_model_id: UUID | None = None
+
+
+class KitUpdate(BaseModel):
+    nombre: str | None = None
+    descripcion: str | None = None
+    activo: bool | None = None
+    ancho_cm: float | None = None
+    largo_cm: float | None = None
+    imagen_url: str | None = None
+    vision_model_id: UUID | None = None
+
+
+class KitItemRead(BaseModel):
+    id: UUID
+    kit_id: UUID
+    pieza_id: UUID
+    cantidad_requerida: int
+    pos_x: float | None
+    pos_y: float | None
+    ancho_cm: float | None
+    alto_cm: float | None
+    icono: str | None
+    es_agrupacion: bool
+
+    model_config = {"from_attributes": True}
+
+
+class KitRead(BaseModel):
+    id: UUID
+    nombre: str
+    descripcion: str | None
+    activo: bool
+    ancho_cm: float | None
+    largo_cm: float | None
+    imagen_url: str | None
+    vision_model_id: UUID | None
+    created_at: datetime
+    items: list[KitItemRead] = []
+
+    model_config = {"from_attributes": True}
+
+
+@router.post("/", response_model=KitRead, status_code=201)
+async def create_kit(
+    data: KitCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    if data.vision_model_id:
+        vm = await session.get(VisionModel, data.vision_model_id)
+        if not vm:
+            raise HTTPException(status_code=404, detail="VisionModel not found")
+
+    kit = Kit(**data.model_dump())
+    session.add(kit)
+    await session.commit()
+    await session.refresh(kit)
+    return kit
+
+
+@router.get("/", response_model=list[KitRead])
+async def list_kits(
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.exec(select(Kit))
+    kits = result.all()
+    # List view does not include item details.
+    return [KitRead.model_validate({**k.model_dump(), "items": []}) for k in kits]
+
+
+@router.get("/{kit_id}", response_model=KitRead)
+async def get_kit(
+    kit_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    kit = await session.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+    await session.refresh(kit, attribute_names=["items"])
+    return kit
+
+
+@router.put("/{kit_id}", response_model=KitRead)
+async def update_kit(
+    kit_id: UUID,
+    data: KitUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    kit = await session.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+
+    payload = data.model_dump(exclude_unset=True)
+    if "vision_model_id" in payload and payload["vision_model_id"] is not None:
+        vm = await session.get(VisionModel, payload["vision_model_id"])
+        if not vm:
+            raise HTTPException(status_code=404, detail="VisionModel not found")
+
+    for k, v in payload.items():
+        setattr(kit, k, v)
+
+    session.add(kit)
+    await session.commit()
+    await session.refresh(kit)
+    await session.refresh(kit, attribute_names=["items"])
+    return kit
+
+
+@router.delete("/{kit_id}", status_code=204)
+async def delete_kit(
+    kit_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    kit = await session.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+    await session.delete(kit)
+    await session.commit()
+
+
+@router.post("/{kit_id}/items", response_model=KitItemRead, status_code=201)
+async def add_item(
+    kit_id: UUID,
+    data: KitItemCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    kit = await session.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+
+    pieza = await session.get(Pieza, data.pieza_id)
+    if not pieza:
+        raise HTTPException(status_code=404, detail="Pieza not found")
+
+    existing = await session.exec(
+        select(KitPiezaLink).where(
+            KitPiezaLink.kit_id == kit_id,
+            KitPiezaLink.pieza_id == data.pieza_id,
+        )
+    )
+    if existing.first():
+        raise HTTPException(status_code=409, detail="Pieza already linked to kit")
+
+    item = KitPiezaLink(kit_id=kit_id, **data.model_dump())
+    session.add(item)
+    await session.commit()
+    await session.refresh(item)
+    return item
+
+
+@router.put("/{kit_id}/items/{item_id}", response_model=KitItemRead)
+async def update_item(
+    kit_id: UUID,
+    item_id: UUID,
+    data: KitItemUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.exec(
+        select(KitPiezaLink).where(
+            KitPiezaLink.id == item_id,
+            KitPiezaLink.kit_id == kit_id,
+        )
+    )
+    item = result.first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    payload = data.model_dump(exclude_unset=True)
+    for k, v in payload.items():
+        setattr(item, k, v)
+
+    session.add(item)
+    await session.commit()
+    await session.refresh(item)
+    return item
+
+
+@router.delete("/{kit_id}/items/{item_id}", status_code=204)
+async def delete_item(
+    kit_id: UUID,
+    item_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.exec(
+        select(KitPiezaLink).where(
+            KitPiezaLink.id == item_id,
+            KitPiezaLink.kit_id == kit_id,
+        )
+    )
+    item = result.first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    await session.delete(item)
+    await session.commit()
