@@ -41,22 +41,22 @@ Definition of Done (S5 partial): `get_strategy()` exists and fails fast on missi
 
 ## Slice S3 — Frontend ID migration (number→string UUID) + wire kits + PiezaPicker + delete kit mocks
 
-- [ ] 3.1 Frontend: migrate ID fields to `string` in `ai-kitting-frontend/src/api/types.ts` (incl. `Deteccion.id_pieza: string | null`).
-- [ ] 3.2 Frontend: update API modules for string IDs in `ai-kitting-frontend/src/api/{kits.ts,inspections.ts}` and env base paths in `ai-kitting-frontend/src/lib/constants.ts` + `ai-kitting-frontend/src/api/backend.ts`.
-- [ ] 3.3 Frontend: update Zustand stores for string IDs and bump persist key in `ai-kitting-frontend/src/store/{kitStore.ts,inspectionStore.ts}`.
-- [ ] 3.4 Frontend: add `ai-kitting-frontend/src/components/kit/PiezaPicker.tsx` backed by `GET /backend/piezas/` (design §3.2).
-- [ ] 3.5 Frontend: rewire `CreateKitPage` and kits flows to real `/api/kits/*` (TanStack Query), remove any remaining kit mock imports.
-- [ ] 3.6 Frontend: run `tsc -b` clean; fix remaining type errors in the listed 18 files (design §3.1).
+- [x] 3.1 Frontend: migrate ID fields to `string` in `ai-kitting-frontend/src/api/types.ts` (incl. `Deteccion.id_pieza: string | null`).
+- [x] 3.2 Frontend: update API modules for string IDs in `ai-kitting-frontend/src/api/{kits.ts,inspections.ts}` and env base paths in `ai-kitting-frontend/src/lib/constants.ts` + `ai-kitting-frontend/src/api/backend.ts`.
+- [x] 3.3 Frontend: update Zustand stores for string IDs and bump persist key in `ai-kitting-frontend/src/store/{kitStore.ts,inspectionStore.ts}`.
+- [x] 3.4 Frontend: add `ai-kitting-frontend/src/components/kit/PiezaPicker.tsx` backed by `GET /backend/piezas/` (design §3.2).
+- [x] 3.5 Frontend: rewire `CreateKitPage` and kits flows to real `/api/kits/*` (TanStack Query), remove any remaining kit mock imports.
+- [x] 3.6 Frontend: run `tsc -b` clean; fix remaining type errors in the listed 18 files (design §3.1).
 
 Definition of Done (S3): app compiles; CreateKitPage creates a kit using real backend IDs; kits list renders from `GET /api/kits` (not local-only).
 
 ## Slice S2 — Backend inspections (Inspeccion+Deteccion models + inspeccionRouter CRUD+filters + imagen_s3_key nullable)
 
-- [ ] 2.1 Backend: create SQLModel schemas `Inspeccion` + `Deteccion` in `AI-Cup-/backend/src/models/inspeccion.py` (design §2.1, specs inspections).
-- [ ] 2.2 Backend: create `AI-Cup-/backend/src/routes/inspeccionRouter.py` with `GET /api/inspections` list + filters and `GET /{id}` detail (design §2.2, specs scenarios).
-- [ ] 2.3 Backend: implement `GET /{id}/result` returning `InspeccionResultRead` shape for UI result page.
-- [ ] 2.4 Backend: implement `POST /{id}/confirm` applying corrections (set `corregido_por_operador=true`, validate deteccion belongs to inspection).
-- [ ] 2.5 Backend: mount `inspeccionRouter` and import new models for `create_all` in `AI-Cup-/backend/src/main.py` + `AI-Cup-/backend/src/db.py`.
+- [x] 2.1 Backend: create SQLModel schemas `Inspeccion` + `Deteccion` in `AI-Cup-/backend/src/models/inspeccion.py` (design §2.1, specs inspections).
+- [x] 2.2 Backend: create `AI-Cup-/backend/src/routes/inspeccionRouter.py` with `GET /api/inspections` list + filters and `GET /{id}` detail (design §2.2, specs scenarios).
+- [x] 2.3 Backend: implement `GET /{id}/result` returning `InspeccionResultRead` shape for UI result page.
+- [x] 2.4 Backend: implement `POST /{id}/confirm` applying corrections (set `corregido_por_operador=true`, validate deteccion belongs to inspection).
+- [x] 2.5 Backend: mount `inspeccionRouter` and import new models for `create_all` in `AI-Cup-/backend/src/main.py` + `AI-Cup-/backend/src/db.py`.
 
 Definition of Done (S2): list endpoint supports `kit_id/resultado_general/fecha_desde/fecha_hasta/operador` filters without 500s; detail+result+confirm return 404/422 correctly per spec; `imagen_s3_key` persists as NULL.
 

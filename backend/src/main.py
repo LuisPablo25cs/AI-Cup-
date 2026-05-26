@@ -14,6 +14,7 @@ from src.routes.scanRouter import router as scanRouter
 from src.routes.taskRouter import router as taskRouter
 from src.routes.visionModelRouter import router as visionModelRouter
 from src.routes.kitRouter import router as kitRouter
+from src.routes.inspeccionRouter import router as inspeccionRouter
 
 Path("/app/data").mkdir(exist_ok=True)
 
@@ -66,3 +67,4 @@ app.include_router(scanRouter)
 app.include_router(taskRouter)
 app.include_router(visionModelRouter)
 app.include_router(kitRouter)
+app.include_router(inspeccionRouter)
