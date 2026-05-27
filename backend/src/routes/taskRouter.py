@@ -187,19 +187,32 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
     approved = 0
     rejected = 0
     
+    # Resolve the correct Redis keys (handling variant-prefixed frames like staging:{taskID}:{variante}_{frame})
+    resolved_keys = []
+    for img in imgStatus:
+        pattern = f"staging:{taskID}:*_{img.frame}"
+        matches = list(r.scan_iter(pattern))
+        if matches:
+            resolved_keys.append(matches[0].decode("utf-8"))
+        else:
+            # Fallback to direct frame index
+            resolved_keys.append(f"staging:{taskID}:{img.frame}")
+
     # Batch-fetch current keys to update them in a performant pipeline
     pipe = r.pipeline()
-    for img in imgStatus:
-        metaKey = f"staging:{taskID}:{img.frame}"
-        pipe.get(metaKey)
+    for key in resolved_keys:
+        pipe.get(key)
     raw_values = pipe.execute()
     
     update_pipe = r.pipeline()
     has_updates = False
     
-    for img, val in zip(imgStatus, raw_values):
+    for img, key, val in zip(imgStatus, resolved_keys, raw_values):
         if not val:
-            continue
+            raise HTTPException(
+                status_code=400,
+                detail=f"Validation metadata not found for Frame {img.frame} in Redis (key: {key}). The task might have expired or been cleared."
+            )
             
         data = json.loads(val)
         normalized_status = img.status.strip().lower()
@@ -211,14 +224,20 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
         if normalized_status in ("approved", "aproved"):
             approved += 1
             data["status"] = "approved"
-            update_pipe.setex(f"staging:{taskID}:{img.frame}", 864000, json.dumps(data))
+            update_pipe.setex(key, 864000, json.dumps(data))
             has_updates = True
 
             # Determine the variant from the metadata (set by DINO worker)
             variante = data.get("variante", "sin_bolsa")
             
             # S3 and Postgres logic
-            if local_img_path and os.path.exists(local_img_path):
+            if not local_img_path or not os.path.exists(local_img_path):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Local image file not found for Frame {img.frame} (expected path: {local_img_path}). Make sure the volume mounts are synchronized."
+                )
+
+            try:
                 # 1. Read local files
                 with open(local_img_path, "rb") as f_img:
                     img_bytes = f_img.read()
@@ -247,6 +266,14 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
                     )
                     db_session.add(db_img)
                     await db_session.commit()
+            except Exception as s3_db_err:
+                import traceback
+                print(f"[ERROR] Failed S3/DB upload for Frame {img.frame}: {s3_db_err}")
+                traceback.print_exc()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to upload Frame {img.frame} to S3 or save to Database. Error: {str(s3_db_err)}"
+                )
                     
                 # 4. Clean up local files
                 try:
@@ -263,7 +290,7 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
         elif normalized_status in ("rejected", "not_approved", "not_aproved"):
             rejected += 1
             data["status"] = "rejected"
-            update_pipe.setex(f"staging:{taskID}:{img.frame}", 864000, json.dumps(data))
+            update_pipe.setex(key, 864000, json.dumps(data))
             has_updates = True
             
             # Clean up local files
