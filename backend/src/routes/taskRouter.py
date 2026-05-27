@@ -247,13 +247,21 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
                     with open(local_txt_path, "rb") as f_txt:
                         txt_bytes = f_txt.read()
                 
-                # 2. Upload to S3 using variant-specific subfolder
-                img_uuid = str(uuid.uuid4())
-                bucket, key_s3 = upload_imagen(img_bytes, str(pieza_id), filename_uuid=img_uuid, variante=variante)
+                # 2. Upload to S3 using the frame name and variant-specific path
+                bucket, key_s3 = upload_imagen(
+                    img_bytes,
+                    str(pieza_id),
+                    frame_name=img.frame,
+                    variante=variante,
+                )
                 
                 key_s3_label = None
                 if txt_bytes:
-                    _, key_s3_label = upload_label(txt_bytes, str(pieza_id), filename_uuid=img_uuid, variante=variante)
+                    _, key_s3_label = upload_label(
+                        txt_bytes,
+                        str(pieza_id),
+                        id_render_set=img.frame,
+                    )
                 
                 # 3. Create database entry with variant tracking
                 async with AsyncSessionLocal() as db_session:
