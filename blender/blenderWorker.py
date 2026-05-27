@@ -11,23 +11,53 @@ STAGING.mkdir(exist_ok=True)
 
 r = redis.Redis(host="redis", port=6379, db=0)
 
+RABBITMQ_PARAMS = pika.ConnectionParameters(
+    host="rabbitmq",
+    heartbeat=3600,                  # 1 hour — survives long Blender renders
+    blocked_connection_timeout=7200  # 2 hours — absolute max render time
+)
+
 def connect_rabbitmq(delay=10):
     attempt = 0
     while True:
         try:
-            conn = pika.BlockingConnection(
-                pika.ConnectionParameters(
-                    host="rabbitmq",
-                    heartbeat=3600,               # 1 hour — survives long Blender renders
-                    blocked_connection_timeout=7200  # 2 hours — absolute max render time
-                )
-            )
+            conn = pika.BlockingConnection(RABBITMQ_PARAMS)
             print("Connected to RabbitMQ")
             return conn
         except Exception as e:
             attempt += 1
             print(f"RabbitMQ not ready (attempt {attempt}): {e} — retrying in {delay}s...")
             time.sleep(delay)
+
+def publish_to_dino(taskId, frame, img_path):
+    """
+    Opens a short-lived dedicated publisher connection to send one frame
+    to the grounding-sam-queue.
+
+    Using the consumer channel for publishing inside a long-running callback
+    is unreliable with pika BlockingConnection: the event loop is blocked
+    inside the render loop so the write buffer never gets flushed to the socket.
+    A separate connection guarantees delivery for every sin_bolsa frame.
+    """
+    try:
+        pub_conn = pika.BlockingConnection(RABBITMQ_PARAMS)
+        pub_ch   = pub_conn.channel()
+        pub_ch.queue_declare(queue="grounding-sam-queue", durable=True)
+        pub_ch.basic_publish(
+            exchange="",
+            routing_key="grounding-sam-queue",
+            body=json.dumps({
+                "taskId": taskId,
+                "frame":  frame,
+                "path":   str(img_path)
+            }),
+            properties=pika.BasicProperties(delivery_mode=2)  # persistent message
+        )
+        pub_conn.close()
+        return True
+    except Exception as e:
+        print(f"  [!] Failed to publish frame {frame} to DINO queue: {e}", flush=True)
+        return False
 
 def autoPhotoTaker3000(ch, method, properties, body):
     task      = json.loads(body)
@@ -36,9 +66,9 @@ def autoPhotoTaker3000(ch, method, properties, body):
     prompt    = task["prompt"]
     bagTypes  = task.get("bag_types", [])
 
-    # ── Mark task as actively rendering in Redis so /tasks reflects reality ──
+    # Mark task as actively rendering in Redis so /tasks reflects reality
     r.setex(f"status:{taskId}", 864000, "RENDERING")
-    print(f"[{taskId}] Status → RENDERING", flush=True)
+    print(f"[{taskId}] Status -> RENDERING", flush=True)
 
     # NOTE: We do NOT ack here. We ack only after the render completes.
     # This ensures that if this worker crashes mid-render, RabbitMQ will
@@ -54,32 +84,28 @@ def autoPhotoTaker3000(ch, method, properties, body):
         "--python", "/app/render/renderScene.py",
         "--", sceneFile, str(task_staging), bag_arg
     ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    
+
     for line in process.stdout:
-        # Print progress lines
-        if "blanco" in line or "gris" in line or "negro" in line or "hdri" in line or "Completado" in line or "Modelo:" in line or "Traceback" in line or "Error" in line or "Bolsa" in line or "Simulando" in line:
+        # Print notable progress lines
+        if any(kw in line for kw in ["blanco", "gris", "negro", "hdri", "Completado", "Modelo:", "Traceback", "Error", "Bolsa", "Simulando"]):
             print(line.strip(), flush=True)
-            
+
         # Parse saved frames in real-time and route them
         if "Saved:" in line:
             try:
-                # Extracts the file path between single quotes
+                # Extract the file path between single quotes
                 start_idx = line.find("'") + 1
-                end_idx = line.rfind("'")
+                end_idx   = line.rfind("'")
                 img_path_str = line[start_idx:end_idx]
                 img_path = Path(img_path_str)
-                
-                # Double-check file exists before queuing
-                if img_path.exists():
-                    frame = img_path.stem
 
-                    # Determine if this frame is from a bag variant or the base render
-                    # The render script outputs to: .../sin_bolsa/frame.jpg or .../con_bolsa_clear/frame.jpg
+                if img_path.exists():
+                    frame         = img_path.stem
                     parent_folder = img_path.parent.name
 
                     if parent_folder.startswith("con_bolsa_"):
-                        # BAGGED FRAME: do NOT send to DINO. Store as awaiting its twin's label.
-                        variante = parent_folder  # e.g., "con_bolsa_clear"
+                        # BAGGED FRAME: store as awaiting its twin's label from DINO
+                        variante = parent_folder  # e.g. "con_bolsa_clear"
                         meta_key = f"staging:{taskId}:{variante}_{frame}"
                         r.setex(meta_key, 864000, json.dumps({
                             "local_path": str(img_path),
@@ -90,7 +116,7 @@ def autoPhotoTaker3000(ch, method, properties, body):
                         }))
                         print(f"--> [Bag] Stored {variante}/{frame} — awaiting twin label", flush=True)
                     else:
-                        # UNBAGGED FRAME: pipeline to DINO for annotation
+                        # UNBAGGED FRAME: send to DINO via a dedicated publisher connection
                         meta_key = f"staging:{taskId}:sin_bolsa_{frame}"
                         r.setex(meta_key, 864000, json.dumps({
                             "local_path": str(img_path),
@@ -99,32 +125,23 @@ def autoPhotoTaker3000(ch, method, properties, body):
                             "taskId":     taskId,
                             "frame":      frame
                         }))
-                        ch.basic_publish(
-                            exchange="",
-                            routing_key="grounding-sam-queue",
-                            body=json.dumps({
-                                "taskId": taskId,
-                                "frame":  frame,
-                                "path":   str(img_path)
-                            })
-                        )
-                        print(f"--> [Pipelined] Queued sin_bolsa/{frame} for DINO annotation", flush=True)
+                        ok = publish_to_dino(taskId, frame, img_path)
+                        if ok:
+                            print(f"--> [Pipelined] Queued sin_bolsa/{frame} for DINO annotation", flush=True)
             except Exception as e:
                 print(f"Error pipelining frame: {e}", flush=True)
 
-    # ── Wait for render to complete and handle success/failure ──
+    # Wait for render to finish and handle success / failure
     process.wait()
     if process.returncode == 0:
         r.setex(f"status:{taskId}", 864000, "DONE")
-        print(f"[{taskId}] Render finished OK → Status: DONE", flush=True)
+        print(f"[{taskId}] Render finished OK -> Status: DONE", flush=True)
         ch.basic_ack(delivery_tag=method.delivery_tag)
     else:
         r.setex(f"status:{taskId}", 864000, "FAILED")
-        print(f"[{taskId}] Render FAILED (exit code {process.returncode}) → nacking", flush=True)
-        # nack without requeue so the message doesn't re-enter the queue
-        # and create an infinite crash loop. Investigate FAILED tasks manually.
+        print(f"[{taskId}] Render FAILED (exit code {process.returncode}) -> nacking", flush=True)
+        # nack without requeue — prevents infinite crash loops on broken models
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-
 
 
 while True:
