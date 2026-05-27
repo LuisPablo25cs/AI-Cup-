@@ -13,8 +13,8 @@ r = redis.Redis(host="redis", port=6379, db=0)
 
 RABBITMQ_PARAMS = pika.ConnectionParameters(
     host="rabbitmq",
-    heartbeat=3600,                  # 1 hour — survives long Blender renders
-    blocked_connection_timeout=7200  # 2 hours — absolute max render time
+    heartbeat=0,                     # Disabled — completely prevents timeout drops during ultra-long renders
+    blocked_connection_timeout=None  # Disabled
 )
 
 def connect_rabbitmq(delay=10):

@@ -115,8 +115,8 @@ class TrainerWorker:
         """RabbitMQ continuous connection listener with automated connection recovery."""
         connection_params = pika.ConnectionParameters(
             host=config.RABBITMQ_HOST,
-            heartbeat=600,                    # Keeps connections alive during intensive training
-            blocked_connection_timeout=300
+            heartbeat=0,                      # Disabled — completely prevents timeout drops during long training runs
+            blocked_connection_timeout=None  # Disabled
         )
 
         while True:
