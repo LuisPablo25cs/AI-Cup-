@@ -18,8 +18,8 @@ def connect_rabbitmq(delay=10):
             conn = pika.BlockingConnection(
                 pika.ConnectionParameters(
                     host="rabbitmq",
-                    heartbeat=600,
-                    blocked_connection_timeout=300
+                    heartbeat=3600,               # 1 hour — survives long Blender renders
+                    blocked_connection_timeout=7200  # 2 hours — absolute max render time
                 )
             )
             print("Connected to RabbitMQ")
@@ -36,9 +36,13 @@ def autoPhotoTaker3000(ch, method, properties, body):
     prompt    = task["prompt"]
     bagTypes  = task.get("bag_types", [])
 
-    # Ack immediately so RabbitMQ's consumer_timeout (30 min)
-    # doesn't kill the channel during long renders.
-    ch.basic_ack(delivery_tag=method.delivery_tag)
+    # ── Mark task as actively rendering in Redis so /tasks reflects reality ──
+    r.setex(f"status:{taskId}", 864000, "RENDERING")
+    print(f"[{taskId}] Status → RENDERING", flush=True)
+
+    # NOTE: We do NOT ack here. We ack only after the render completes.
+    # This ensures that if this worker crashes mid-render, RabbitMQ will
+    # re-deliver the message to another healthy worker automatically.
 
     bag_arg = ",".join(bagTypes) if bagTypes else "none"
 
@@ -107,6 +111,19 @@ def autoPhotoTaker3000(ch, method, properties, body):
                         print(f"--> [Pipelined] Queued sin_bolsa/{frame} for DINO annotation", flush=True)
             except Exception as e:
                 print(f"Error pipelining frame: {e}", flush=True)
+
+    # ── Wait for render to complete and handle success/failure ──
+    process.wait()
+    if process.returncode == 0:
+        r.setex(f"status:{taskId}", 864000, "DONE")
+        print(f"[{taskId}] Render finished OK → Status: DONE", flush=True)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+    else:
+        r.setex(f"status:{taskId}", 864000, "FAILED")
+        print(f"[{taskId}] Render FAILED (exit code {process.returncode}) → nacking", flush=True)
+        # nack without requeue so the message doesn't re-enter the queue
+        # and create an infinite crash loop. Investigate FAILED tasks manually.
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 
 
