@@ -12,5 +12,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Run the pipeline orchestrator worker
-CMD ["python", "-u", "src/worker.py"]
+# Run the pipeline orchestrator worker as a module so relative imports resolve correctly
+CMD ["python", "-u", "-m", "src.modelWorker"]

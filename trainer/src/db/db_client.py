@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import List, Optional
 from datetime import datetime, timezone
 
-from .config import config
-from .models import Pieza, RenderSet, Label, Imagen, VisionModel
+from ..config.config import config
+from ..models import Pieza, RenderSet, Label, Imagen, VisionModel
 
 @dataclass(frozen=True)
 class TrainingSample:

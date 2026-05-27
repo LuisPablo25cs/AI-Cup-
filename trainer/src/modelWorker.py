@@ -6,12 +6,12 @@ import logging
 from uuid import UUID
 from pathlib import Path
 
-from .config import config
-from .db_client import DBClient
-from .s3_client import S3Client
-from .dataset_builder import DatasetBuilder
+from .config.config import config
+from .db.db_client import DBClient
+from .db.s3_client import S3Client
+from .db.dataset_builder import DatasetBuilder
 from .model_factory import ModelFactory
-from .tracker import ExperimentTracker
+from .comet_ml.tracker import ExperimentTracker
 
 logger = logging.getLogger("trainer.worker")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
