@@ -18,6 +18,113 @@ class ImageConfirmation(BaseModel):
 
 router = APIRouter(tags=["Tasks"])
 
+@router.get("/tasks")
+async def get_all_tasks():
+    # 1. Scan for all keys matching status:*
+    keys = list(r.scan_iter("status:*"))
+    if not keys:
+        return []
+    
+    task_ids = []
+    for key in keys:
+        try:
+            key_str = key.decode("utf-8")
+            task_id = key_str.split(":", 1)[1]
+            task_ids.append(task_id)
+        except Exception:
+            continue
+            
+    if not task_ids:
+        return []
+        
+    # 2. Fetch all staging keys to calculate frames summary per task
+    staging_keys = list(r.scan_iter("staging:*"))
+    task_frames = {}
+    
+    if staging_keys:
+        pipe = r.pipeline()
+        for s_key in staging_keys:
+            pipe.get(s_key)
+        staging_values = pipe.execute()
+        
+        for s_key, s_val in zip(staging_keys, staging_values):
+            if not s_val:
+                continue
+            try:
+                s_key_str = s_key.decode("utf-8")
+                parts = s_key_str.split(":")
+                if len(parts) >= 3:
+                    task_id = parts[1]
+                    frame_data = json.loads(s_val.decode("utf-8"))
+                    frame_status = frame_data.get("status", "unknown")
+                    
+                    if task_id not in task_frames:
+                        task_frames[task_id] = {
+                            "total": 0,
+                            "pending": 0,
+                            "pending_validation": 0,
+                            "approved": 0,
+                            "rejected": 0,
+                            "awaiting_twin_label": 0
+                        }
+                    
+                    task_frames[task_id]["total"] += 1
+                    if frame_status in task_frames[task_id]:
+                        task_frames[task_id][frame_status] += 1
+            except Exception:
+                continue
+
+    # 3. Pipelined fetch for task metadata
+    pipe = r.pipeline()
+    for task_id in task_ids:
+        pipe.get(f"status:{task_id}")
+        pipe.get(f"class_id:{task_id}")
+        pipe.get(f"file:{task_id}")
+        pipe.get(f"prompt:{task_id}")
+        pipe.get(f"bag_type:{task_id}")
+        
+    results = pipe.execute()
+    
+    tasks_list = []
+    for idx, task_id in enumerate(task_ids):
+        offset = idx * 5
+        status_raw = results[offset]
+        class_id_raw = results[offset+1]
+        file_raw = results[offset+2]
+        prompt_raw = results[offset+3]
+        bag_type_raw = results[offset+4]
+        
+        status = status_raw.decode("utf-8") if status_raw else "UNKNOWN"
+        class_id = class_id_raw.decode("utf-8") if class_id_raw else None
+        filename = file_raw.decode("utf-8") if file_raw else None
+        prompt = prompt_raw.decode("utf-8") if prompt_raw else None
+        
+        bag_types = []
+        if bag_type_raw:
+            try:
+                bag_types = json.loads(bag_type_raw.decode("utf-8"))
+            except Exception:
+                pass
+                
+        tasks_list.append({
+            "task_id": task_id,
+            "status": status,
+            "class_id": class_id,
+            "filename": filename,
+            "prompt": prompt,
+            "bag_types": bag_types,
+            "frames_summary": task_frames.get(task_id, {
+                "total": 0,
+                "pending": 0,
+                "pending_validation": 0,
+                "approved": 0,
+                "rejected": 0,
+                "awaiting_twin_label": 0
+            })
+        })
+        
+    return tasks_list
+
 @router.get("/fetchImages/{taskID}")
 async def fetchImages(taskID: str): 
     status = r.get(f"status:{taskID}")
