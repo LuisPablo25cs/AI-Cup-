@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Dict, Any
 from ultralytics import YOLO
 
-from .config import config
-from .dataset_builder import Dataset
+from .config.config import config
+from .db.dataset_builder import Dataset
 
 @dataclass(frozen=True)
 class TrainingResult:

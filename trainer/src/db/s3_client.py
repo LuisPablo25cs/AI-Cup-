@@ -1,7 +1,7 @@
 import boto3
 from botocore.config import Config as BotoConfig
 from pathlib import Path
-from .config import config
+from ..config.config import config
 
 class S3Client:
     def __init__(self):

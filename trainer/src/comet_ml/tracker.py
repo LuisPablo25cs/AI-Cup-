@@ -1,8 +1,8 @@
 import logging
 import traceback
 from typing import Dict, Any, List
-from .config import config
-from .dataset_builder import Dataset
+from ..config.config import config
+from ..db.dataset_builder import Dataset
 
 logger = logging.getLogger("trainer.tracker")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
