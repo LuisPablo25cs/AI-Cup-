@@ -48,7 +48,8 @@ class S3Client:
             return
 
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = cache_path.with_suffix(".tmp")
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = cache_path.with_name(f"{safe_key}.{os.getpid()}.tmp")
 
         try:
             self.download_file(s3_key, tmp_path)
