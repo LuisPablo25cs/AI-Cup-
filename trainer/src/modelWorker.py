@@ -27,16 +27,21 @@ class TrainerWorker:
         model_id = UUID(model_id_str)
         model_name = job["nombre"]
         piezas_config = job["piezas"] # list of {"id_pieza": str, "class_index": int}
+        hyperparams = job.get("hyperparams", {})
+
+        effective = {
+            "base_model": hyperparams.get("base_model", config.BASE_MODEL),
+            "train_epochs": hyperparams.get("epochs", config.TRAIN_EPOCHS),
+            "train_patience": hyperparams.get("patience", config.TRAIN_PATIENCE),
+            "train_imgsz": hyperparams.get("imgsz", config.TRAIN_IMGSZ),
+            "device": config.DEVICE,
+        }
 
         # Initialize tracker parameters
         tracker.start_experiment(model_name, model_id_str)
-        tracker.log_hyperparameters({
-            "base_model": config.BASE_MODEL,
-            "train_epochs": config.TRAIN_EPOCHS,
-            "train_patience": config.TRAIN_PATIENCE,
-            "train_imgsz": config.TRAIN_IMGSZ,
-            "device": config.DEVICE
-        })
+        tracker.log_hyperparameters(effective)
+
+        logger.info(f"Model {model_id_str}: Training hyperparameters: {effective}")
 
         # Step 1: Set database state to PREPARING_DATA
         logger.info(f"Model {model_id_str}: Updating database status to PREPARING_DATA")
@@ -76,7 +81,7 @@ class TrainerWorker:
         try:
             # Step 4: Run training
             logger.info(f"Model {model_id_str}: Initiating YOLOv8n-seg trainer.")
-            result = self.factory.train(dataset, model_id_str)
+            result = self.factory.train(dataset, model_id_str, hyperparams)
             tracker.log_training_result(result)
 
             # Step 5: Upload trained weights to S3
