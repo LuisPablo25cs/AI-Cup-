@@ -8,6 +8,8 @@ from typing import List
 from src.db import AsyncSessionLocal
 from src.models.pieza import Pieza
 from src.models.imagen import Imagen
+from src.models.label import Label
+from src.models.render_set import RenderSet
 from src.services.s3 import upload_imagen, upload_label
 from src.core.config import r
 from pydantic import BaseModel
@@ -247,22 +249,46 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
                     with open(local_txt_path, "rb") as f_txt:
                         txt_bytes = f_txt.read()
                 
-                # 2. Upload to S3 using variant-specific subfolder
-                img_uuid = str(uuid.uuid4())
-                bucket, key_s3 = upload_imagen(img_bytes, str(pieza_id), filename_uuid=img_uuid, variante=variante)
-                
-                key_s3_label = None
-                if txt_bytes:
-                    _, key_s3_label = upload_label(txt_bytes, str(pieza_id), filename_uuid=img_uuid, variante=variante)
-                
-                # 3. Create database entry with variant tracking
+                # 2. Create RenderSet, upload files to S3, and create DB entries
                 async with AsyncSessionLocal() as db_session:
-                    db_img = Imagen(
+                    render_set = RenderSet(
                         id_pieza=pieza_id,
+                        frame_name=img.frame,
+                    )
+                    db_session.add(render_set)
+                    await db_session.flush()
+
+                    render_set_id = render_set.id_render_set
+
+                    bucket, key_s3 = upload_imagen(
+                        img_bytes,
+                        str(pieza_id),
+                        frame_name=str(render_set_id),
+                        variante=variante,
+                    )
+
+                    label_id = None
+                    if txt_bytes:
+                        label_bucket, key_s3_label = upload_label(
+                            txt_bytes,
+                            str(pieza_id),
+                            id_render_set=str(render_set_id),
+                        )
+                        db_label = Label(
+                            id_render_set=render_set_id,
+                            bucket=label_bucket,
+                            key_s3=key_s3_label,
+                        )
+                        db_session.add(db_label)
+                        await db_session.flush()
+                        label_id = db_label.id_label
+
+                    db_img = Imagen(
+                        id_render_set=render_set_id,
+                        id_label=label_id,
+                        variante=variante,
                         bucket=bucket,
                         key_s3=key_s3,
-                        key_s3_label=key_s3_label,
-                        bagType=variante
                     )
                     db_session.add(db_img)
                     await db_session.commit()
