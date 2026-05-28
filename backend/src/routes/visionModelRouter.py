@@ -13,11 +13,15 @@ from sqlalchemy import func
 from src.db import AsyncSessionLocal
 from src.models.pieza import Pieza
 from src.models.vision_model import VisionModel, ModelPiezaLink
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class GenerateModelRequest(BaseModel):
     nombre: str
     piezas: List[uuid.UUID]
+    epochs: Optional[int] = Field(default=None, ge=1, le=1000)
+    patience: Optional[int] = Field(default=None, ge=1, le=200)
+    imgsz: Optional[int] = Field(default=None, ge=320, le=1280)
+    base_model: Optional[str] = Field(default=None)
 
 
 class ModelPiezaEntry(BaseModel):
@@ -78,6 +82,17 @@ async def generateModel(request: GenerateModelRequest):
         async with connection:
             channel = await connection.channel()
             queue = await channel.declare_queue("trainer-queue", durable=True)
+
+            hyperparams = {}
+            if request.epochs is not None:
+                hyperparams["epochs"] = request.epochs
+            if request.patience is not None:
+                hyperparams["patience"] = request.patience
+            if request.imgsz is not None:
+                hyperparams["imgsz"] = request.imgsz
+            if request.base_model is not None:
+                hyperparams["base_model"] = request.base_model
+
             await channel.default_exchange.publish(
                 aio_pika.Message(
                     body=json.dumps({
@@ -88,7 +103,8 @@ async def generateModel(request: GenerateModelRequest):
                                 "id_pieza": str(p_id),
                                 "class_index": idx
                             } for idx, p_id in enumerate(request.piezas)
-                        ]
+                        ],
+                        "hyperparams": hyperparams,
                     }).encode(),
                     delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                 ),
