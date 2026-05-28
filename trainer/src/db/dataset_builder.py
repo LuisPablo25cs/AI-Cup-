@@ -194,15 +194,14 @@ class DatasetBuilder:
                     local_img_path = dest_img_dir / local_img_name
                     dest_lbl_path = dest_lbl_dir / local_lbl_name
                     
-                    # 1. Download image
-                    self._s3.download_file(sample.image_key, local_img_path)
+                    # 1. Download image (cache-aware)
+                    self._s3.download_file_cached(sample.image_key, local_img_path)
                     
-                    # 2. Download label to temp, then remap to destination
+                    # 2. Download label to temp, then remap to destination (cache-aware)
                     temp_lbl_hash = hashlib.md5(sample.label_key.encode()).hexdigest()
                     temp_lbl_path = temp_dir / f"{temp_lbl_hash}.txt"
                     
-                    if not temp_lbl_path.exists():
-                        self._s3.download_file(sample.label_key, temp_lbl_path)
+                    self._s3.download_file_cached(sample.label_key, temp_lbl_path)
                     
                     self._remap_label_class(temp_lbl_path, dest_lbl_path, piece.class_index)
                     
