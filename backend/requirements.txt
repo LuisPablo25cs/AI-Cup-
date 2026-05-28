@@ -6,6 +6,7 @@ asyncpg
 boto3
 python-multipart
 aio-pika
+pika
 redis
 pillow
 ultralytics
