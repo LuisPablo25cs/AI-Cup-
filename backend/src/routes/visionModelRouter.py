@@ -1,7 +1,7 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from typing import List
 import os
-import pika
+import aio_pika
 import json
 import uuid
 import io
@@ -18,7 +18,7 @@ class GenerateModelRequest(BaseModel):
 
 router = APIRouter(tags=["Vision Models"])
 
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 
 @router.post("/generateModel")
 async def generateModel(request: GenerateModelRequest):
@@ -46,28 +46,30 @@ async def generateModel(request: GenerateModelRequest):
             db_session.add(link)
         await db_session.commit()
 
-        # 4. Publish training job payload to RabbitMQ
-        connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host=RABBITMQ_HOST)
+        # 4. Publish training job payload to RabbitMQ (async, non-blocking)
+        connection = await aio_pika.connect_robust(
+            host=RABBITMQ_HOST,
+            port=5672,
         )
-        channel = connection.channel()
-        channel.queue_declare(queue="trainer-queue", durable=True)
-        channel.basic_publish(
-            exchange='',
-            routing_key="trainer-queue",
-            body=json.dumps({
-                "model_id": str(model.id_model),
-                "nombre": model.nombre,
-                "piezas": [
-                    {
-                        "id_pieza": str(p_id),
-                        "class_index": idx
-                    } for idx, p_id in enumerate(request.piezas)
-                ]
-            }),
-            properties=pika.BasicProperties(delivery_mode=2) # Persistent message
-        )
-        connection.close()
+        async with connection:
+            channel = await connection.channel()
+            queue = await channel.declare_queue("trainer-queue", durable=True)
+            await channel.default_exchange.publish(
+                aio_pika.Message(
+                    body=json.dumps({
+                        "model_id": str(model.id_model),
+                        "nombre": model.nombre,
+                        "piezas": [
+                            {
+                                "id_pieza": str(p_id),
+                                "class_index": idx
+                            } for idx, p_id in enumerate(request.piezas)
+                        ]
+                    }).encode(),
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                ),
+                routing_key="trainer-queue",
+            )
 
         return {
             "model_id": str(model.id_model),

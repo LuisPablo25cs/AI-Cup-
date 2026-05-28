@@ -5,7 +5,7 @@ python-dotenv
 asyncpg
 boto3
 python-multipart
-pika
+aio-pika
 redis
 pillow
 ultralytics
