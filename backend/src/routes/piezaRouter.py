@@ -3,6 +3,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from src.db import get_session
 from src.models.pieza import Pieza
+from src.models.render_set import RenderSet
+from src.models.imagen import Imagen
+from src.services.s3 import get_object_read_url
 from uuid import UUID
 from datetime import datetime, timezone
 from pydantic import BaseModel
@@ -25,6 +28,15 @@ class PiezaUpdate(BaseModel):
     activo: bool | None = None
 
 
+class ThumbnailsRequest(BaseModel):
+    piezas: list[UUID]
+
+
+class ThumbnailEntry(BaseModel):
+    id_pieza: UUID
+    url: str | None
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/", response_model=Pieza)
@@ -45,6 +57,43 @@ async def obtener_piezas(
 ):
     result = await session.exec(select(Pieza))
     return result.all()
+
+
+@router.post("/thumbnails", response_model=list[ThumbnailEntry])
+async def obtener_thumbnails(
+    data: ThumbnailsRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return a presigned URL for one sample image per requested pieza.
+
+    Looks up the first `Imagen` linked through `RenderSet` for each pieza.
+    Returns `null` URL when the pieza has no images yet.
+    """
+    if not data.piezas:
+        return []
+
+    result = await session.exec(
+        select(Imagen, RenderSet.id_pieza)
+        .join(RenderSet, Imagen.id_render_set == RenderSet.id_render_set)
+        .where(RenderSet.id_pieza.in_(data.piezas))
+    )
+
+    first_per_pieza: dict[UUID, Imagen] = {}
+    for imagen, id_pieza in result.all():
+        if id_pieza not in first_per_pieza:
+            first_per_pieza[id_pieza] = imagen
+
+    entries: list[ThumbnailEntry] = []
+    for id_pieza in data.piezas:
+        imagen = first_per_pieza.get(id_pieza)
+        url = (
+            get_object_read_url(imagen.bucket, imagen.key_s3)
+            if imagen and imagen.bucket and imagen.key_s3
+            else None
+        )
+        entries.append(ThumbnailEntry(id_pieza=id_pieza, url=url))
+
+    return entries
 
 
 @router.get("/{id_pieza}", response_model=Pieza)
