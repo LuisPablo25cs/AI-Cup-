@@ -4,8 +4,6 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
-import time
-import pika
 
 from src.db import test_connection, init_db
 from src.routes.imagenRouter import router as imagenRouter
@@ -18,20 +16,7 @@ from src.routes.inspeccionRouter import router as inspeccionRouter
 
 Path("/app/data").mkdir(exist_ok=True)
 
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 
-def connect_rabbitmq(retries=10, delay=10):
-    for attempt in range(retries):
-        try:
-            conn = pika.BlockingConnection(
-                pika.ConnectionParameters(host=RABBITMQ_HOST)
-            )
-            print("Connected to RabbitMQ")
-            return conn
-        except Exception as e:
-            print(f"RabbitMQ not ready ({attempt+1}/{retries}), retrying in {delay}s...")
-            time.sleep(delay)
-    raise Exception("Could not connect to RabbitMQ after retries")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
