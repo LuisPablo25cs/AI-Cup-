@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Any
@@ -6,6 +7,8 @@ from ultralytics import YOLO
 
 from .config.config import config
 from .db.dataset_builder import Dataset
+
+logger = logging.getLogger("trainer.model_factory")
 
 @dataclass(frozen=True)
 class TrainingResult:
@@ -23,6 +26,16 @@ class ModelFactory:
         Executes YOLOv8n-seg training with specialized augmentations for sim-to-real gap.
         """
         model = YOLO(self.base_model)
+        
+        # Add custom callbacks to explicitly log epoch events
+        def on_train_epoch_start(trainer):
+            logger.info(f"YOLO Training Epoch {trainer.epoch + 1}/{trainer.epochs} started...")
+
+        def on_train_epoch_end(trainer):
+            logger.info(f"YOLO Training Epoch {trainer.epoch + 1}/{trainer.epochs} completed.")
+
+        model.add_callback("on_train_epoch_start", on_train_epoch_start)
+        model.add_callback("on_train_epoch_end", on_train_epoch_end)
         
         # Setup specific output project/run directories
         run_name = f"train_{model_id}"

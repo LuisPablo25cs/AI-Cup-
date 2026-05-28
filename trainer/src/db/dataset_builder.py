@@ -1,5 +1,6 @@
 import shutil
 import hashlib
+import logging
 from uuid import uuid4
 from pathlib import Path
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ import random
 
 from .s3_client import S3Client
 from .db_client import TrainingSample
+
+logger = logging.getLogger("trainer.dataset_builder")
 
 @dataclass(frozen=True)
 class Dataset:
@@ -148,17 +151,37 @@ class DatasetBuilder:
         num_val = 0
         fingerprint_inputs = []
 
+        total_pieces = len(self._pieces)
+        logger.info(f"Assembling datasets on local disk for {total_pieces} pieces.")
+
         for piece in self._pieces:
             class_names[piece.class_index] = piece.class_name
             
+            # Group samples with and without images/labels for granular logging
+            valid_samples = [s for s in piece.samples if s.image_key and s.label_key]
+            missing_images = [s for s in piece.samples if not s.image_key]
+            missing_labels = [s for s in piece.samples if not s.label_key]
+            
+            logger.info(
+                f"Loading folder for piece '{piece.class_name}' (class_index: {piece.class_index}):\n"
+                f"  - Total samples configured in database: {len(piece.samples)}\n"
+                f"  - Valid samples (with image and label): {len(valid_samples)}\n"
+                f"  - Invalid samples (missing image): {len(missing_images)}\n"
+                f"  - Invalid samples (missing label): {len(missing_labels)}"
+            )
+            
             # Apply the split strategy
-            train_samples, val_samples = self._split_strategy.split(piece.samples, self._train_ratio)
+            train_samples, val_samples = self._split_strategy.split(valid_samples, self._train_ratio)
+            logger.info(f"  - Split strategy applied: {len(train_samples)} train samples, {len(val_samples)} validation samples.")
             
             # Record dataset fingerprint components deterministically
-            for sample in sorted(piece.samples, key=lambda s: s.image_key):
+            for sample in sorted(valid_samples, key=lambda s: s.image_key):
                 fingerprint_inputs.append(f"{piece.class_index}:{sample.image_key}:{sample.label_key}")
 
             # Assemble splits
+            total_downloads = len(train_samples) + len(val_samples)
+            download_count = 0
+            
             for split_name, samples_list, dest_img_dir, dest_lbl_dir in [
                 ("train", train_samples, img_train_dir, lbl_train_dir),
                 ("val", val_samples, img_val_dir, lbl_val_dir)
@@ -187,6 +210,10 @@ class DatasetBuilder:
                         num_train += 1
                     else:
                         num_val += 1
+                    
+                    download_count += 1
+                    if download_count % 50 == 0 or download_count == total_downloads:
+                        logger.info(f"  -> Downloading '{piece.class_name}': Processed {download_count}/{total_downloads} ({int(download_count/total_downloads*100)}%) samples...")
 
         # Compute stable dataset hash
         fingerprint_raw = ",".join(fingerprint_inputs).encode("utf-8")

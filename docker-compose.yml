@@ -180,6 +180,7 @@ services:
     environment:
       - CUDA_VISIBLE_DEVICES=2
       - CUDA_HOME=/usr/local/cuda
+      - PYTHONUNBUFFERED=1
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REDIS_URL=redis://redis:6379
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
