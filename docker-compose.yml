@@ -3,6 +3,7 @@ services:
     build:
       context: ./anotation        
       dockerfile: Dockerfile
+    ipc: host
     environment:
       - CUDA_VISIBLE_DEVICES=0
       - CUDA_HOME=/usr/local/cuda
@@ -34,6 +35,7 @@ services:
     build:
       context: ./anotation        
       dockerfile: Dockerfile
+    ipc: host
     environment:
       - CUDA_VISIBLE_DEVICES=0
       - CUDA_HOME=/usr/local/cuda
@@ -175,6 +177,7 @@ services:
       context: ./trainer
       dockerfile: Dockerfile
     container_name: yolo_trainer_worker
+    ipc: host
     env_file:
       - .env
     environment:
