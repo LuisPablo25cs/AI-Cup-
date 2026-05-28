@@ -29,17 +29,19 @@ class TrainerWorker:
         piezas_config = job["piezas"] # list of {"id_pieza": str, "class_index": int}
         hyperparams = job.get("hyperparams", {})
 
+        # Single resolution point: merge user overrides with config defaults.
+        # `effective` is the authoritative hyperparam set for this run; both
+        # the experiment tracker and the trainer factory consume it directly.
         effective = {
-            "base_model": hyperparams.get("base_model", config.BASE_MODEL),
-            "train_epochs": hyperparams.get("epochs", config.TRAIN_EPOCHS),
-            "train_patience": hyperparams.get("patience", config.TRAIN_PATIENCE),
-            "train_imgsz": hyperparams.get("imgsz", config.TRAIN_IMGSZ),
-            "device": config.DEVICE,
+            "base_model": hyperparams.get("base_model") or config.BASE_MODEL,
+            "epochs": hyperparams.get("epochs") or config.TRAIN_EPOCHS,
+            "patience": hyperparams.get("patience") or config.TRAIN_PATIENCE,
+            "imgsz": hyperparams.get("imgsz") or config.TRAIN_IMGSZ,
         }
 
         # Initialize tracker parameters
         tracker.start_experiment(model_name, model_id_str)
-        tracker.log_hyperparameters(effective)
+        tracker.log_hyperparameters({**effective, "device": config.DEVICE})
 
         logger.info(f"Model {model_id_str}: Training hyperparameters: {effective}")
 
@@ -81,7 +83,7 @@ class TrainerWorker:
         try:
             # Step 4: Run training
             logger.info(f"Model {model_id_str}: Initiating YOLOv8n-seg trainer.")
-            result = self.factory.train(dataset, model_id_str, hyperparams)
+            result = self.factory.train(dataset, model_id_str, effective)
             tracker.log_training_result(result)
 
             # Step 5: Upload trained weights to S3

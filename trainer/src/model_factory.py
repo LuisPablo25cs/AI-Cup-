@@ -18,20 +18,18 @@ class TrainingResult:
 
 
 class ModelFactory:
-    def __init__(self):
-        self.base_model = config.BASE_MODEL
-
-    def train(self, dataset: Dataset, model_id: str, hyperparams: dict | None = None) -> TrainingResult:
+    def train(self, dataset: Dataset, model_id: str, effective: dict) -> TrainingResult:
         """
-        Executes YOLOv8n-seg training with specialized augmentations for sim-to-real gap.
-        """
-        if hyperparams is None:
-            hyperparams = {}
+        Executes YOLO-seg training with specialized augmentations for sim-to-real gap.
 
-        base_model = hyperparams.get("base_model", config.BASE_MODEL)
-        epochs = hyperparams.get("epochs", config.TRAIN_EPOCHS)
-        patience = hyperparams.get("patience", config.TRAIN_PATIENCE)
-        imgsz = hyperparams.get("imgsz", config.TRAIN_IMGSZ)
+        `effective` must contain fully-resolved hyperparameters: `base_model`,
+        `epochs`, `patience`, `imgsz`. The caller (worker) is responsible for
+        merging user overrides with config defaults before invoking this method.
+        """
+        base_model = effective["base_model"]
+        epochs = effective["epochs"]
+        patience = effective["patience"]
+        imgsz = effective["imgsz"]
 
         model = YOLO(base_model)
         
