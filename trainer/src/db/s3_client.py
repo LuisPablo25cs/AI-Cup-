@@ -1,4 +1,6 @@
 import boto3
+import hashlib
+import os
 import shutil
 from botocore.config import Config as BotoConfig
 from pathlib import Path
@@ -33,17 +35,36 @@ class S3Client:
         On first request, downloads from S3 and saves a copy to the cache directory.
         Subsequent requests copy from the cache without touching S3.
         Cache is append-only — the user cleans it manually.
+
+        Uses a temp-file + atomic rename to prevent partial-file corruption
+        on crash/kill, and a flat hash name to prevent path traversal via S3 keys.
         """
-        cache_path = config.S3_CACHE_DIR / s3_key
+        safe_key = hashlib.sha256(s3_key.encode()).hexdigest()
+        cache_path = config.S3_CACHE_DIR / safe_key
 
         if cache_path.exists():
             local_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(cache_path, local_path)
+            self._copy_fast(cache_path, local_path)
             return
 
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.download_file(s3_key, cache_path)
-        shutil.copy2(cache_path, local_path)
+        tmp_path = cache_path.with_suffix(".tmp")
+
+        try:
+            self.download_file(s3_key, tmp_path)
+            os.replace(tmp_path, cache_path)
+            self._copy_fast(cache_path, local_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    @staticmethod
+    def _copy_fast(src: Path, dst: Path) -> None:
+        """Hardlinks when possible (same filesystem), falls back to copy2."""
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
 
     def upload_file(self, local_path: Path, s3_key: str) -> None:
         """Uploads a local file to the configured S3 bucket."""
