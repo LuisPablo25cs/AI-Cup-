@@ -10,7 +10,7 @@ fileTypes = [
     "model/gltf-binary",        # .glb MIME type
     "application/octet-stream", # fallback some clients send for .glb
     "application/zip",
-    "application/x-zim-compressed",
+    "application/x-zip-compressed",
 ]
 
 AVAILABLE_BAG_TYPES = ["clear", "opaque"]
