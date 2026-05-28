@@ -21,7 +21,11 @@ class GenerateModelRequest(BaseModel):
     epochs: Optional[int] = Field(default=None, ge=1, le=1000)
     patience: Optional[int] = Field(default=None, ge=1, le=200)
     imgsz: Optional[int] = Field(default=None, ge=320, le=1280)
-    base_model: Optional[str] = Field(default=None)
+    base_model: Optional[str] = Field(
+        default=None,
+        # YOLO segmentation weight names: yolov8n-seg.pt, yolo11n-seg.pt, yolo26n-seg.pt, etc.
+        pattern=r"^yolo(v\d+|\d+)[nsmlx](-seg|-cls|-pose|-obb)?\.pt$",
+    )
 
 
 class ModelPiezaEntry(BaseModel):
