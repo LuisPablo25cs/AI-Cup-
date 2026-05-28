@@ -178,7 +178,7 @@ services:
     env_file:
       - .env
     environment:
-      - CUDA_VISIBLE_DEVICES=2
+      - CUDA_VISIBLE_DEVICES=0
       - CUDA_HOME=/usr/local/cuda
       - PYTHONUNBUFFERED=1
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
