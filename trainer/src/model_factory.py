@@ -65,9 +65,9 @@ class ModelFactory:
             "scale": 0.5,                     # Scaled variants
             
             # Sim-to-Real Color Gap Adjustments
-            "hsv_h": 0.015,                   # Hue modulation
-            "hsv_s": 0.7,                     # Saturation shifts
-            "hsv_v": 0.4,                     # Brightness shifts (heightened for light/shadows)
+            "hsv_h": 0.08,                    # Hue modulation (raised for color temperature variance)
+            "hsv_s": 0.9,                     # Saturation shifts (raised for reflection intensity variance)
+            "hsv_v": 0.8,                     # Brightness shifts (raised significantly for strong reflections/shadows)
             
             # Geometric Transformations
             "degrees": float(os.getenv("TRAIN_DEGREES", "180.0")),  # Complete rotation override
