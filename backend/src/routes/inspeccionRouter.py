@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import desc
+from sqlalchemy import case, desc, func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -68,6 +68,120 @@ class DeteccionCorrection(BaseModel):
 
 class ConfirmRequest(BaseModel):
     corrections: list[DeteccionCorrection]
+
+
+class ByResultBreakdown(BaseModel):
+    correcto: int = 0
+    anomalia: int = 0
+    error: int = 0
+
+
+class HourlyBucket(BaseModel):
+    hour: str
+    inspected: int
+    rejected: int
+
+
+class InspectionStats(BaseModel):
+    total_inspections: int = 0
+    by_result: ByResultBreakdown = ByResultBreakdown()
+    fpy: float = 0.0
+    rejection_rate: float = 0.0
+    avg_processing_time: float = 0.0
+    avg_similarity: float = 0.0
+    hourly: list[HourlyBucket] = []
+    recent: list[InspeccionSummary] = []
+
+
+@router.get("/stats", response_model=InspectionStats)
+async def stats(
+    range: str = "all",
+    session: AsyncSession = Depends(get_session),
+):
+    since: datetime | None = None
+    now = datetime.now(timezone.utc)
+    if range == "today":
+        since = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+    elif range == "7d":
+        since = now - timedelta(days=7)
+    elif range == "30d":
+        since = now - timedelta(days=30)
+
+    # --- total + by_result + averages ---
+    stmt = select(
+        func.count(Inspeccion.id).label("total"),
+        func.sum(case((Inspeccion.resultado_general == "correcto", 1), else_=0)).label("correcto"),
+        func.sum(case((Inspeccion.resultado_general == "anomalia", 1), else_=0)).label("anomalia"),
+        func.sum(case((Inspeccion.resultado_general == "error", 1), else_=0)).label("error"),
+        func.avg(Inspeccion.tiempo_procesamiento).label("avg_time"),
+        func.avg(Inspeccion.similitud).label("avg_sim"),
+    )
+    if since is not None:
+        stmt = stmt.where(Inspeccion.fecha >= since)
+
+    result = await session.exec(stmt)
+    row = result.one()
+    total = row.total or 0
+    correcto = row.correcto or 0
+    anomalia = row.anomalia or 0
+    error = row.error or 0
+    avg_time = round(float(row.avg_time or 0), 1)
+    avg_sim = round(float(row.avg_sim or 0), 1)
+
+    fpy = round(correcto / total * 100, 1) if total > 0 else 0.0
+    rejection = round((anomalia + error) / total * 100, 1) if total > 0 else 0.0
+
+    # --- hourly buckets ---
+    hourly_stmt = (
+        select(
+            func.date_trunc("hour", Inspeccion.fecha).label("hour"),
+            func.count(Inspeccion.id).label("inspected"),
+            func.sum(
+                case(
+                    (Inspeccion.resultado_general.in_(["anomalia", "error"]), 1),
+                    else_=0,
+                )
+            ).label("rejected"),
+        )
+        .group_by("hour")
+        .order_by("hour")
+        .limit(24)
+    )
+    if since is not None:
+        hourly_stmt = hourly_stmt.where(Inspeccion.fecha >= since)
+
+    hourly_result = await session.exec(hourly_stmt)
+    hourly: list[HourlyBucket] = []
+    for row_h in hourly_result.all():
+        dt: datetime = row_h.hour
+        hourly.append(HourlyBucket(
+            hour=dt.strftime("%Hh"),
+            inspected=row_h.inspected or 0,
+            rejected=row_h.rejected or 0,
+        ))
+
+    # --- recent inspections ---
+    recent_stmt = select(Inspeccion).order_by(desc(Inspeccion.fecha)).limit(10)
+    if since is not None:
+        recent_stmt = recent_stmt.where(Inspeccion.fecha >= since)
+
+    recent_result = await session.exec(recent_stmt)
+    recent_items = recent_result.all()
+
+    return InspectionStats(
+        total_inspections=total,
+        by_result=ByResultBreakdown(
+            correcto=correcto,
+            anomalia=anomalia,
+            error=error,
+        ),
+        fpy=fpy,
+        rejection_rate=rejection,
+        avg_processing_time=avg_time,
+        avg_similarity=avg_sim,
+        hourly=hourly,
+        recent=[InspeccionSummary.model_validate(item) for item in recent_items],
+    )
 
 
 @router.get("/", response_model=list[InspeccionSummary])

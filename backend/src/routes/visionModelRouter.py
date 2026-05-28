@@ -12,12 +12,13 @@ from sqlalchemy import func
 
 from src.db import AsyncSessionLocal
 from src.models.pieza import Pieza
+from src.models.kit import Kit, KitPiezaLink
 from src.models.vision_model import VisionModel, ModelPiezaLink
 from pydantic import BaseModel, Field
 
 class GenerateModelRequest(BaseModel):
     nombre: str
-    piezas: List[uuid.UUID]
+    kit_id: uuid.UUID
     epochs: Optional[int] = Field(default=None, ge=1, le=1000)
     patience: Optional[int] = Field(default=None, ge=1, le=200)
     imgsz: Optional[int] = Field(default=None, ge=320, le=1280)
@@ -56,12 +57,23 @@ RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 async def generateModel(request: GenerateModelRequest):
     if not request.nombre.strip():
         raise HTTPException(status_code=400, detail="Model name cannot be empty")
-    if not request.piezas:
-        raise HTTPException(status_code=400, detail="Must provide at least one piece ID for training")
-        
-    # 1. Verify that all piece IDs exist in the database
+
     async with AsyncSessionLocal() as db_session:
-        for idx, p_id in enumerate(request.piezas):
+        # 1. Load the kit and validate it has pieces
+        kit = await db_session.get(Kit, request.kit_id)
+        if not kit:
+            raise HTTPException(status_code=404, detail=f"Kit {request.kit_id} not found")
+
+        kit_items = await db_session.exec(
+            select(KitPiezaLink).where(KitPiezaLink.kit_id == request.kit_id)
+        )
+        piece_ids = [item.pieza_id for item in kit_items.all()]
+
+        if not piece_ids:
+            raise HTTPException(status_code=400, detail="Kit has no pieces assigned")
+
+        # Verify all pieces exist
+        for p_id in piece_ids:
             pieza = await db_session.get(Pieza, p_id)
             if not pieza:
                 raise HTTPException(status_code=404, detail=f"Piece with ID {p_id} not found")
@@ -73,12 +85,17 @@ async def generateModel(request: GenerateModelRequest):
         await db_session.refresh(model)
 
         # 3. Create the ModelPiezaLink entries linking each piece to this model
-        for idx, p_id in enumerate(request.piezas):
+        for idx, p_id in enumerate(piece_ids):
             link = ModelPiezaLink(id_model=model.id_model, id_pieza=p_id, class_index=idx)
             db_session.add(link)
         await db_session.commit()
 
-        # 4. Publish training job payload to RabbitMQ (async, non-blocking)
+        # 4. Associate this model with the kit (bidirectional link)
+        kit.vision_model_id = model.id_model
+        db_session.add(kit)
+        await db_session.commit()
+
+        # 5. Publish training job payload to RabbitMQ (async, non-blocking)
         connection = await aio_pika.connect_robust(
             host=RABBITMQ_HOST,
             port=5672,
@@ -106,7 +123,7 @@ async def generateModel(request: GenerateModelRequest):
                             {
                                 "id_pieza": str(p_id),
                                 "class_index": idx
-                            } for idx, p_id in enumerate(request.piezas)
+                            } for idx, p_id in enumerate(piece_ids)
                         ],
                         "hyperparams": hyperparams,
                     }).encode(),
@@ -119,6 +136,7 @@ async def generateModel(request: GenerateModelRequest):
             "model_id": str(model.id_model),
             "nombre": model.nombre,
             "estado": model.estado,
+            "kit_id": str(kit.id),
             "message": "Training job queued successfully"
         }
 

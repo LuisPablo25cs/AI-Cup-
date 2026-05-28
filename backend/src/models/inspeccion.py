@@ -57,6 +57,14 @@ class Inspeccion(SQLModel, table=True):
             index=True,
         )
     )
+    vision_model_id: UUID | None = Field(
+        default=None,
+        sa_column=SAColumn(
+            pg.UUID,
+            ForeignKey("vision_model.id_model"),
+            nullable=True,
+        ),
+    )
     kit_nombre: str
     fecha: datetime = Field(
         sa_column=SAColumn(
