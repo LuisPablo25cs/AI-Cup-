@@ -1,11 +1,14 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 import os
 import aio_pika
 import json
 import uuid
 import io
 from PIL import Image
+from sqlmodel import select
+from sqlalchemy import func
 
 from src.db import AsyncSessionLocal
 from src.models.pieza import Pieza
@@ -15,6 +18,27 @@ from pydantic import BaseModel
 class GenerateModelRequest(BaseModel):
     nombre: str
     piezas: List[uuid.UUID]
+
+
+class ModelPiezaEntry(BaseModel):
+    id_pieza: uuid.UUID
+    nombre: Optional[str] = None
+    class_index: Optional[int] = None
+
+
+class VisionModelListEntry(BaseModel):
+    id_model: uuid.UUID
+    nombre: str
+    estado: str
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    piezas_count: int = 0
+    key_s3_weights: Optional[str] = None
+
+
+class VisionModelDetail(VisionModelListEntry):
+    piezas: List[ModelPiezaEntry] = []
+
 
 router = APIRouter(tags=["Vision Models"])
 
@@ -77,6 +101,66 @@ async def generateModel(request: GenerateModelRequest):
             "estado": model.estado,
             "message": "Training job queued successfully"
         }
+
+@router.get("/models", response_model=List[VisionModelListEntry])
+async def list_models():
+    """Return all vision models with a piece count, newest first."""
+    async with AsyncSessionLocal() as session:
+        result = await session.exec(
+            select(VisionModel, func.count(ModelPiezaLink.id_pieza))
+            .outerjoin(ModelPiezaLink, ModelPiezaLink.id_model == VisionModel.id_model)
+            .group_by(VisionModel.id_model)
+            .order_by(VisionModel.created_at.desc().nullslast())
+        )
+
+        entries: List[VisionModelListEntry] = []
+        for model, piezas_count in result.all():
+            entries.append(VisionModelListEntry(
+                id_model=model.id_model,
+                nombre=model.nombre,
+                estado=model.estado,
+                created_at=model.created_at,
+                completed_at=model.completed_at,
+                piezas_count=piezas_count or 0,
+                key_s3_weights=model.key_s3_weights,
+            ))
+        return entries
+
+
+@router.get("/models/{model_id}", response_model=VisionModelDetail)
+async def get_model(model_id: uuid.UUID):
+    """Return a single vision model with its piezas (id, nombre, class_index)."""
+    async with AsyncSessionLocal() as session:
+        model = await session.get(VisionModel, model_id)
+        if not model:
+            raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+        link_result = await session.exec(
+            select(ModelPiezaLink, Pieza.nombre)
+            .join(Pieza, Pieza.id_pieza == ModelPiezaLink.id_pieza, isouter=True)
+            .where(ModelPiezaLink.id_model == model_id)
+            .order_by(ModelPiezaLink.class_index.asc())
+        )
+
+        piezas_entries: List[ModelPiezaEntry] = []
+        for link, pieza_nombre in link_result.all():
+            piezas_entries.append(ModelPiezaEntry(
+                id_pieza=link.id_pieza,
+                nombre=pieza_nombre,
+                class_index=link.class_index,
+            ))
+
+        return VisionModelDetail(
+            id_model=model.id_model,
+            nombre=model.nombre,
+            estado=model.estado,
+            created_at=model.created_at,
+            completed_at=model.completed_at,
+            piezas_count=len(piezas_entries),
+            key_s3_weights=model.key_s3_weights,
+            piezas=piezas_entries,
+        )
+
 
 @router.post("/find-objects")
 async def find_objects(file: UploadFile = File(...)): 
