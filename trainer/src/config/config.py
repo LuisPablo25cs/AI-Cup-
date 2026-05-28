@@ -40,6 +40,7 @@ class Config:
     
     # Path configuration
     WORKSPACE_DIR: Path = Path(os.getenv("WORKSPACE_DIR", "/app/workspace"))
+    S3_CACHE_DIR: Path = Path(os.getenv("S3_CACHE_DIR", str(WORKSPACE_DIR / "s3_cache")))
 
     # Hardware Acceleration
     @property
@@ -52,3 +53,4 @@ config = Config()
 
 # Ensure workspace directory exists at startup
 config.WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+config.S3_CACHE_DIR.mkdir(parents=True, exist_ok=True)

@@ -18,14 +18,20 @@ class TrainingResult:
 
 
 class ModelFactory:
-    def __init__(self):
-        self.base_model = config.BASE_MODEL
+    def train(self, dataset: Dataset, model_id: str, effective: dict) -> TrainingResult:
+        """
+        Executes YOLO-seg training with specialized augmentations for sim-to-real gap.
 
-    def train(self, dataset: Dataset, model_id: str) -> TrainingResult:
+        `effective` must contain fully-resolved hyperparameters: `base_model`,
+        `epochs`, `patience`, `imgsz`. The caller (worker) is responsible for
+        merging user overrides with config defaults before invoking this method.
         """
-        Executes YOLOv8n-seg training with specialized augmentations for sim-to-real gap.
-        """
-        model = YOLO(self.base_model)
+        base_model = effective["base_model"]
+        epochs = effective["epochs"]
+        patience = effective["patience"]
+        imgsz = effective["imgsz"]
+
+        model = YOLO(base_model)
         
         # Add custom callbacks to explicitly log epoch events
         def on_train_epoch_start(trainer):
@@ -44,9 +50,9 @@ class ModelFactory:
         # Hyperparameters & Sim-To-Real Augmentations
         train_args = {
             "data": str(dataset.yaml_path),
-            "epochs": config.TRAIN_EPOCHS,
-            "patience": config.TRAIN_PATIENCE,
-            "imgsz": config.TRAIN_IMGSZ,
+            "epochs": epochs,
+            "patience": patience,
+            "imgsz": imgsz,
             "batch": -1,                      # Auto-batch size matching hardware VRAM limit
             "device": config.DEVICE,
             "project": str(project_dir),
@@ -94,7 +100,7 @@ class ModelFactory:
             "fitness": float(raw_metrics.get("fitness", 0.0))
         }
 
-        epochs_completed = getattr(results, "epoch", config.TRAIN_EPOCHS)
+        epochs_completed = getattr(results, "epoch", epochs)
 
         return TrainingResult(
             best_weights=best_pt_path,
