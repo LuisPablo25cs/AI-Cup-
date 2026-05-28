@@ -68,6 +68,7 @@ BAG_REGISTRY = {
         "air_damping":   20,
         "sim_frames":    60,
     },
+    
     "opaque": {
         "base_color":   (0.95, 0.95, 0.95, 1.0),
         "alpha":        1.0,
