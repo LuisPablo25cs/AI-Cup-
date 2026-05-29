@@ -133,7 +133,7 @@ def run_inference(
 
         encontrado = detected_count >= cantidad_requerida
 
-        avg_conf = round(sum(confs) / detected_count, 4) if confs else 0.0
+        avg_conf = round(sum(confs) / detected_count * 100, 4) if confs else 0.0
 
         bbox = per_pieza_best_bbox.get(pieza_id)
 
