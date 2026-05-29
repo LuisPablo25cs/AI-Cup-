@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import case, desc, func
 from sqlmodel import select
@@ -11,6 +12,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.db import get_session
 from src.models.inspeccion import Deteccion, Inspeccion
+from src.models.kit import Kit, KitPiezaLink
+from src.models.pieza import Pieza
+from src.models.vision_model import ModelPiezaLink, VisionModel
+from src.services.detection import run_inference
+from src.services.inference import get_or_load_model
+from src.services.s3 import BUCKET_NAME, s3_client
 
 
 router = APIRouter(prefix="/api/inspections", tags=["Inspections"])
@@ -278,3 +285,170 @@ async def confirm(
     await session.commit()
     await session.refresh(insp, attribute_names=["detecciones"])
     return insp
+
+
+@router.post("/", response_model=InspeccionRead, status_code=201)
+async def create_inspection(
+    kit_id: UUID = Form(...),
+    image: UploadFile = File(...),
+    operador: str | None = Form(None),
+    session: AsyncSession = Depends(get_session),
+) -> InspeccionRead:
+    # --- 1. Validate image content type ---
+    if image.content_type is None or not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=422, detail="image must be an image file")
+
+    image_bytes = await image.read()
+
+    # --- 2. Resolve Kit ---
+    kit = await session.get(Kit, kit_id)
+    if kit is None:
+        raise HTTPException(status_code=404, detail="Kit not found")
+
+    # --- 3. Guard: kit must have a vision_model_id ---
+    if kit.vision_model_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No vision model associated with this kit",
+        )
+
+    # --- 4. Resolve VisionModel ---
+    vision_model = await session.get(VisionModel, kit.vision_model_id)
+    if vision_model is None:
+        raise HTTPException(status_code=404, detail="Vision model not found")
+
+    # --- 5. Guard: model must be COMPLETED ---
+    if vision_model.estado != "COMPLETED":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Model not trained. Current status: {vision_model.estado}",
+        )
+
+    if vision_model.key_s3_weights is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Model weights not available (key_s3_weights is null)",
+        )
+
+    # --- 6. Load ModelPiezaLink → class_map ---
+    mp_stmt = select(ModelPiezaLink).where(
+        ModelPiezaLink.id_model == vision_model.id_model
+    )
+    mp_links = (await session.exec(mp_stmt)).all()
+
+    if not mp_links:
+        raise HTTPException(
+            status_code=409,
+            detail="No piece mappings found for this vision model",
+        )
+
+    # Fetch pieza names for the mapped pieces
+    mp_pieza_ids = {link.id_pieza for link in mp_links}
+    pieza_name_map: dict[UUID, str] = {}
+    if mp_pieza_ids:
+        p_stmt = select(Pieza).where(Pieza.id_pieza.in_(mp_pieza_ids))
+        piezas = (await session.exec(p_stmt)).all()
+        pieza_name_map = {p.id_pieza: p.nombre for p in piezas}
+
+    class_map: dict[int, tuple[UUID, str]] = {}
+    for link in mp_links:
+        nombre = pieza_name_map.get(link.id_pieza, "Unknown")
+        class_map[link.class_index] = (link.id_pieza, nombre)
+
+    # --- 7. Load KitPiezaLink → expected pieces ---
+    kp_stmt = select(KitPiezaLink).where(KitPiezaLink.kit_id == kit_id)
+    kp_links = (await session.exec(kp_stmt)).all()
+
+    kp_pieza_ids = {link.pieza_id for link in kp_links}
+    kp_name_map: dict[UUID, str] = {}
+    if kp_pieza_ids:
+        kp_stmt2 = select(Pieza).where(Pieza.id_pieza.in_(kp_pieza_ids))
+        kp_piezas = (await session.exec(kp_stmt2)).all()
+        kp_name_map = {p.id_pieza: p.nombre for p in kp_piezas}
+
+    expected_pieces: list[tuple[UUID, str, int]] = [
+        (link.pieza_id, kp_name_map.get(link.pieza_id, "Unknown"), link.cantidad_requerida)
+        for link in kp_links
+    ]
+
+    # --- 8. Get or load cached YOLO model ---
+    try:
+        model = await get_or_load_model(
+            vision_model.id_model, vision_model.key_s3_weights
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load inference model: {exc}",
+        )
+
+    # --- 9. Run inference (offloaded to thread) ---
+    try:
+        inference_result = await asyncio.to_thread(
+            run_inference,
+            image_bytes,
+            model,
+            class_map,
+            expected_pieces,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Inference failed: {exc}",
+        )
+
+    # --- 10. Create Inspeccion row ---
+    inspeccion = Inspeccion(
+        kit_id=kit_id,
+        vision_model_id=vision_model.id_model,
+        kit_nombre=kit.nombre,
+        resultado_general=inference_result.resultado_general,
+        similitud=inference_result.similitud,
+        tiempo_procesamiento=inference_result.tiempo_procesamiento,
+        operador=operador,
+    )
+    session.add(inspeccion)
+
+    # --- 11. Bulk-insert Deteccion rows ---
+    for det in inference_result.detections:
+        deteccion = Deteccion(
+            inspeccion=inspeccion,
+            pieza_id=det.pieza_id,
+            pieza_nombre=det.pieza_nombre,
+            encontrado=det.encontrado,
+            confianza=det.confianza,
+            posicion_x_pct=det.bbox[0] if det.bbox else None,
+            posicion_y_pct=det.bbox[1] if det.bbox else None,
+            width_pct=det.bbox[2] if det.bbox else None,
+            height_pct=det.bbox[3] if det.bbox else None,
+        )
+        session.add(deteccion)
+
+    # Flush to obtain inspeccion.id for the S3 key (transaction not committed yet)
+    await session.flush()
+
+    # --- 12. Upload original image to S3 ---
+    s3_key = f"inspections/{inspeccion.id}/original.jpg"
+    try:
+        s3_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=s3_key,
+            Body=image_bytes,
+            ContentType=image.content_type or "image/jpeg",
+        )
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload image to S3: {exc}",
+        )
+
+    # --- 13. Persist S3 key ---
+    inspeccion.imagen_s3_key = s3_key
+
+    # --- 14. Commit transaction ---
+    await session.commit()
+    await session.refresh(inspeccion, attribute_names=["detecciones"])
+
+    # --- 15. Return response ---
+    return inspeccion

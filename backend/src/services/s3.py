@@ -1,5 +1,6 @@
 import boto3
 import os
+from pathlib import Path
 from uuid import UUID
 from botocore.config import Config
 from src.models.imagen import BagVariant
@@ -91,6 +92,14 @@ def upload_model(
     )
 
     return BUCKET_NAME, key
+
+# Download
+
+def download_file(bucket: str, key: str, local_path: str) -> None:
+    """Download an S3 object to the local filesystem. Creates parent directories if needed."""
+    Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+    s3_client.download_file(bucket, key, local_path)
+
 
 #Other operations
 
