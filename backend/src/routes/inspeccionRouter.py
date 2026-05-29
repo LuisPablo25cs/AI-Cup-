@@ -421,6 +421,7 @@ async def create_inspection(
             posicion_y_pct=det.bbox[1] if det.bbox else None,
             width_pct=det.bbox[2] if det.bbox else None,
             height_pct=det.bbox[3] if det.bbox else None,
+            estado="correcto" if det.encontrado else "faltante",
         )
         session.add(deteccion)
 
