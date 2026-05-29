@@ -160,11 +160,12 @@ def run_inference(
         if found_confidences
         else 0.0
     )
-    similitud = round((found_count / total_expected) * avg_confidence, 4)
+    # similitud as percentage (0-100) to align with frontend expectations
+    similitud = round((found_count / total_expected) * avg_confidence * 100, 4)
 
-    if similitud >= 0.80:
+    if similitud >= 80:
         resultado = "correcto"
-    elif similitud >= 0.55:
+    elif similitud >= 55:
         resultado = "anomalia"
     else:
         resultado = "error"
