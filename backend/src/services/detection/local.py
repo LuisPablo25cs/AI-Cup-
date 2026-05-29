@@ -9,6 +9,8 @@ from uuid import UUID
 from PIL import Image
 from ultralytics import YOLO
 
+from src.services.inference.model_cache import _YOLO_DEVICE
+
 _YOLO_CONF_THRESHOLD = float(os.getenv("YOLO_CONF_THRESHOLD", "0.25"))
 
 
@@ -77,7 +79,7 @@ def run_inference(
     # ------------------------------------------------------------------
     # 2. YOLO prediction
     # ------------------------------------------------------------------
-    results = model.predict(pil_img, conf=threshold, verbose=False)
+    results = model.predict(pil_img, conf=threshold, device=_YOLO_DEVICE, verbose=False)
 
     yolo_dets: list[tuple[int, float, float, float, float, float]] = []
     # (class_idx, confidence, x1, y1, x2, y2)

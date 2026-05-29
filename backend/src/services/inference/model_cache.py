@@ -38,8 +38,9 @@ async def get_or_load_model(vision_model_id: UUID, key_s3_weights: str) -> YOLO:
     await asyncio.to_thread(download_file, BUCKET_NAME, key_s3_weights, local_path)
 
     # YOLO constructor is also blocking → offload to thread
+    # Note: device is passed to predict(), not to the constructor (ultralytics API)
     model = await asyncio.to_thread(
-        YOLO, local_path, task="segment", device=_YOLO_DEVICE,
+        YOLO, local_path, task="segment",
     )
 
     _MODEL_CACHE[vision_model_id] = model
