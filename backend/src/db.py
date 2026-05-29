@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession  
 from sqlmodel import SQLModel
 import os
@@ -37,6 +38,21 @@ async def test_connection():
 async def init_db():
     async with asyncEngine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+        
+        # Migration: ensure vision_model_id column exists on inspeccion table
+        # (added after initial schema creation for YOLO inference integration)
+        await conn.execute(text("""
+            ALTER TABLE inspeccion 
+            ADD COLUMN IF NOT EXISTS vision_model_id UUID REFERENCES vision_model(id_model)
+        """))
+        print("Database initialized and migrations applied.")
+
+
+async def get_session():
+    async with AsyncSessionLocal() as session:
+        yield session
+
+    #yield devuelve el resultado hasta el momento y continúa con el siguiente paso.
 
 
 
