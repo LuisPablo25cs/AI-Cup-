@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -51,6 +52,8 @@ class InspeccionSummary(BaseModel):
     operador: str | None
     imagen_s3_key: str | None
     created_at: datetime
+    validado_por_operador: bool = False
+    tipo_error: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -77,6 +80,10 @@ class ConfirmRequest(BaseModel):
     corrections: list[DeteccionCorrection]
 
 
+class ValidateRequest(BaseModel):
+    tipo_error: Literal["ninguno", "falso_positivo", "falso_negativo", "ambos"] = "ninguno"
+
+
 class ByResultBreakdown(BaseModel):
     correcto: int = 0
     anomalia: int = 0
@@ -98,6 +105,11 @@ class InspectionStats(BaseModel):
     avg_similarity: float = 0.0
     hourly: list[HourlyBucket] = []
     recent: list[InspeccionSummary] = []
+    false_positive_rate: float = 0.0
+    false_negative_rate: float = 0.0
+    model_accuracy: float = 0.0
+    operator_validation_rate: float = 0.0
+    system_capacity: int = 0
 
 
 @router.get("/stats", response_model=InspectionStats)
@@ -175,6 +187,40 @@ async def stats(
     recent_result = await session.exec(recent_stmt)
     recent_items = recent_result.all()
 
+    # --- validation KPIs (over validated inspections only) ---
+    val_stmt = select(
+        func.count(Inspeccion.id).label("total_validated"),
+        func.sum(
+            case((Inspeccion.tipo_error.in_(["falso_positivo", "ambos"]), 1), else_=0)
+        ).label("false_positives"),
+        func.sum(
+            case((Inspeccion.tipo_error.in_(["falso_negativo", "ambos"]), 1), else_=0)
+        ).label("false_negatives"),
+        func.sum(
+            case((Inspeccion.tipo_error == "ninguno", 1), else_=0)
+        ).label("model_correct"),
+    ).where(Inspeccion.validado_por_operador == True)
+    if since is not None:
+        val_stmt = val_stmt.where(Inspeccion.fecha >= since)
+
+    val_result = await session.exec(val_stmt)
+    val_row = val_result.one()
+    total_validated = val_row.total_validated or 0
+    false_positives = val_row.false_positives or 0
+    false_negatives = val_row.false_negatives or 0
+    model_correct = val_row.model_correct or 0
+
+    false_positive_rate = round(false_positives / total_validated, 4) if total_validated > 0 else 0.0
+    false_negative_rate = round(false_negatives / total_validated, 4) if total_validated > 0 else 0.0
+    model_accuracy = round(model_correct / total_validated, 4) if total_validated > 0 else 0.0
+    operator_validation_rate = round(total_validated / total, 4) if total > 0 else 0.0
+
+    # --- system capacity: inspections in the last 60 minutes ---
+    sixty_min_ago = now - timedelta(minutes=60)
+    cap_stmt = select(func.count(Inspeccion.id)).where(Inspeccion.fecha >= sixty_min_ago)
+    cap_result = await session.exec(cap_stmt)
+    system_capacity = cap_result.one() or 0
+
     return InspectionStats(
         total_inspections=total,
         by_result=ByResultBreakdown(
@@ -188,6 +234,11 @@ async def stats(
         avg_similarity=avg_sim,
         hourly=hourly,
         recent=[InspeccionSummary.model_validate(item) for item in recent_items],
+        false_positive_rate=false_positive_rate,
+        false_negative_rate=false_negative_rate,
+        model_accuracy=model_accuracy,
+        operator_validation_rate=operator_validation_rate,
+        system_capacity=system_capacity,
     )
 
 
@@ -281,6 +332,42 @@ async def confirm(
         d.estado = c.estado
         d.corregido_por_operador = True
         session.add(d)
+
+    # Recalculate resultado_general based on corrected detections vs expected pieces.
+    kp_stmt = select(KitPiezaLink).where(KitPiezaLink.kit_id == insp.kit_id)
+    kp_result = await session.exec(kp_stmt)
+    required_pieza_ids = {link.pieza_id for link in kp_result.all()}
+
+    found_pieza_ids = {
+        d.pieza_id
+        for d in detecciones.values()
+        if d.encontrado and d.pieza_id is not None
+    }
+
+    if required_pieza_ids and required_pieza_ids.issubset(found_pieza_ids):
+        insp.resultado_general = "correcto"
+    else:
+        insp.resultado_general = "anomalia"
+    session.add(insp)
+
+    await session.commit()
+    await session.refresh(insp, attribute_names=["detecciones"])
+    return insp
+
+
+@router.post("/{inspeccion_id}/validate", response_model=InspeccionRead)
+async def validate_inspection(
+    inspeccion_id: UUID,
+    body: ValidateRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    insp = await session.get(Inspeccion, inspeccion_id)
+    if not insp:
+        raise HTTPException(status_code=404, detail="Inspection not found")
+
+    insp.validado_por_operador = True
+    insp.tipo_error = body.tipo_error
+    session.add(insp)
 
     await session.commit()
     await session.refresh(insp, attribute_names=["detecciones"])

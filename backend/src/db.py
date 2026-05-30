@@ -42,8 +42,16 @@ async def init_db():
         # Migration: ensure vision_model_id column exists on inspeccion table
         # (added after initial schema creation for YOLO inference integration)
         await conn.execute(text("""
-            ALTER TABLE inspeccion 
+            ALTER TABLE inspeccion
             ADD COLUMN IF NOT EXISTS vision_model_id UUID REFERENCES vision_model(id_model)
+        """))
+        await conn.execute(text("""
+            ALTER TABLE inspeccion
+            ADD COLUMN IF NOT EXISTS validado_por_operador BOOLEAN DEFAULT FALSE
+        """))
+        await conn.execute(text("""
+            ALTER TABLE inspeccion
+            ADD COLUMN IF NOT EXISTS tipo_error VARCHAR DEFAULT NULL
         """))
         print("Database initialized and migrations applied.")
 

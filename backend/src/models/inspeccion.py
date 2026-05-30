@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Optional
 from uuid import UUID, uuid4
 
 import sqlalchemy.dialects.postgresql as pg
@@ -78,6 +79,8 @@ class Inspeccion(SQLModel, table=True):
     tiempo_procesamiento: float = 0.0
     operador: str | None = Field(default=None, index=True)
     imagen_s3_key: str | None = None
+    validado_por_operador: bool = Field(default=False)
+    tipo_error: Optional[str] = Field(default=None)
     created_at: datetime = Field(
         sa_column=SAColumn(
             DateTime(timezone=True),
