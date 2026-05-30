@@ -126,3 +126,23 @@ def get_object_read_url(bucket: str, key_s3: str, expiration: int = 3600) -> str
 
 def delete_object(bucket: str, key_s3: str) -> None:
     s3_client.delete_object(Bucket=bucket, Key=key_s3)
+
+
+def delete_prefix(bucket: str, prefix: str) -> int:
+    """Delete all objects under a prefix. Returns count deleted.
+
+    Uses list_objects_v2 paginator + delete_objects for batch deletion.
+    Safe for prefixes with more than 1000 objects — paginator handles it.
+    """
+    paginator = s3_client.get_paginator("list_objects_v2")
+    deleted = 0
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        objects = page.get("Contents", [])
+        if not objects:
+            continue
+        s3_client.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": o["Key"]} for o in objects]},
+        )
+        deleted += len(objects)
+    return deleted

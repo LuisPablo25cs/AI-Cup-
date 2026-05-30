@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field as PydField, model_validator
 from sqlmodel import select
@@ -8,9 +10,13 @@ from uuid import UUID
 from datetime import datetime
 
 from src.db import get_session
+from src.dependencies.admin_key import require_admin_key
 from src.models.kit import Kit, KitPiezaLink
+from src.models.inspeccion import Inspeccion
 from src.models.pieza import Pieza
 from src.models.vision_model import VisionModel
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/kits", tags=["Kits"])
@@ -163,12 +169,44 @@ async def update_kit(
 async def delete_kit(
     kit_id: UUID,
     session: AsyncSession = Depends(get_session),
+    _admin: str = Depends(require_admin_key),
 ):
+    from src.services.s3 import delete_object, BUCKET_NAME
+
     kit = await session.get(Kit, kit_id)
     if not kit:
         raise HTTPException(status_code=404, detail="Kit not found")
+
+    s3_key = kit.imagen_url  # capture before delete
+
+    # Null out Inspeccion.kit_id for all inspections linked to this kit.
+    # Preserves audit trail via kit_nombre snapshot.
+    insp_result = await session.exec(
+        select(Inspeccion).where(Inspeccion.kit_id == kit_id)
+    )
+    for insp in insp_result.all():
+        insp.kit_id = None
+        session.add(insp)
+
+    # KitPiezaLink rows cascade via "all, delete-orphan" on Kit.items
+    # and ondelete="CASCADE" FK. Explicit delete is safe.
+    link_result = await session.exec(
+        select(KitPiezaLink).where(KitPiezaLink.kit_id == kit_id)
+    )
+    for link in link_result.all():
+        await session.delete(link)
+
     await session.delete(kit)
     await session.commit()
+
+    # S3 cleanup AFTER commit (best-effort — never roll back a valid DB tx)
+    if s3_key:
+        try:
+            delete_object(BUCKET_NAME, s3_key)
+        except Exception:
+            logger.warning(
+                "Failed to delete S3 cover for kit %s: %s", kit_id, s3_key
+            )
 
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}

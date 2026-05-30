@@ -1,14 +1,21 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from src.db import get_session
+from src.dependencies.admin_key import require_admin_key
 from src.models.pieza import Pieza
+from src.models.kit import Kit, KitPiezaLink
+from src.models.vision_model import VisionModel, ModelPiezaLink
 from src.models.render_set import RenderSet
 from src.models.imagen import Imagen
 from src.services.s3 import get_object_read_url
 from uuid import UUID
 from datetime import datetime, timezone
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/piezas", tags=["Piezas"])
 
@@ -128,15 +135,56 @@ async def actualizar_pieza(
     return pieza
 
 
-@router.delete("/{id_pieza}")
+@router.delete("/{id_pieza}", status_code=204)
 async def eliminar_pieza(
     id_pieza: UUID,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    _admin: str = Depends(require_admin_key),
 ):
+    from src.services.s3 import delete_prefix, BUCKET_NAME
+
     pieza = await session.get(Pieza, id_pieza)
     if not pieza:
         raise HTTPException(status_code=404, detail="Pieza no encontrada")
 
+    # Pre-flight: check references from kits and models
+    kit_refs_result = await session.exec(
+        select(KitPiezaLink, Kit.nombre)
+        .join(Kit, Kit.id == KitPiezaLink.kit_id)
+        .where(KitPiezaLink.pieza_id == id_pieza)
+    )
+    kit_refs = kit_refs_result.all()
+
+    model_refs_result = await session.exec(
+        select(ModelPiezaLink, VisionModel.nombre)
+        .join(VisionModel, VisionModel.id_model == ModelPiezaLink.id_model)
+        .where(ModelPiezaLink.id_pieza == id_pieza)
+    )
+    model_refs = model_refs_result.all()
+
+    if kit_refs or model_refs:
+        entities = []
+        for _link, kit_name in kit_refs:
+            entities.append({"type": "kit", "name": kit_name})
+        for _link, model_name in model_refs:
+            entities.append({"type": "model", "name": model_name})
+
+        count = len(entities)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"Pieza referenced by {count} entity(s)",
+                "entities": entities,
+            },
+        )
+
     await session.delete(pieza)
     await session.commit()
-    return {"message": f"Pieza {id_pieza} eliminada"}
+
+    # S3 cleanup AFTER commit (best-effort)
+    try:
+        delete_prefix(BUCKET_NAME, f"piezas/{id_pieza}/")
+    except Exception:
+        logger.warning(
+            "Failed to delete S3 prefix for pieza %s", id_pieza
+        )

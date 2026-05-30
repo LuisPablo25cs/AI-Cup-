@@ -50,11 +50,12 @@ class Inspeccion(SQLModel, table=True):
         sa_column=SAColumn(pg.UUID, primary_key=True, unique=True, default=uuid4)
     )
 
-    kit_id: UUID = Field(
+    kit_id: UUID | None = Field(
+        default=None,
         sa_column=SAColumn(
             pg.UUID,
             ForeignKey("kit.id"),
-            nullable=False,
+            nullable=True,
             index=True,
         )
     )

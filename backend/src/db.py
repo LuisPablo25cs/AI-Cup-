@@ -53,6 +53,11 @@ async def init_db():
             ALTER TABLE inspeccion
             ADD COLUMN IF NOT EXISTS tipo_error VARCHAR DEFAULT NULL
         """))
+        # Migration: allow kit_id to be nullable so kit deletes can preserve
+        # inspections as audit trail (orphaned rows keep kit_nombre snapshot).
+        await conn.execute(text("""
+            ALTER TABLE inspeccion ALTER COLUMN kit_id DROP NOT NULL
+        """))
         print("Database initialized and migrations applied.")
 
 
