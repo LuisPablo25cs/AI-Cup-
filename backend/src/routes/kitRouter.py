@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field as PydField
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from pydantic import BaseModel, Field as PydField, model_validator
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from uuid import UUID
@@ -86,6 +86,13 @@ class KitRead(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @model_validator(mode='after')
+    def resolve_imagen_url(self) -> 'KitRead':
+        if self.imagen_url and not self.imagen_url.startswith('http'):
+            from src.services.s3 import get_object_read_url, BUCKET_NAME
+            self.imagen_url = get_object_read_url(BUCKET_NAME, self.imagen_url)
+        return self
+
 
 @router.post("/", response_model=KitRead, status_code=201)
 async def create_kit(
@@ -162,6 +169,44 @@ async def delete_kit(
         raise HTTPException(status_code=404, detail="Kit not found")
     await session.delete(kit)
     await session.commit()
+
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_SIZE = 5 * 1024 * 1024
+
+
+@router.post("/{kit_id}/image", response_model=KitRead)
+async def upload_kit_image(
+    kit_id: UUID,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+):
+    from src.services.s3 import upload_kit_image as s3_upload_kit_image
+
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_IMAGE_TYPES)}",
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail="File exceeds the 5 MB size limit")
+
+    kit = await session.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+
+    s3_key = f"kits/{kit_id}/cover.jpg"
+    s3_upload_kit_image(file_bytes, s3_key, file.content_type)
+
+    kit.imagen_url = s3_key
+    session.add(kit)
+    await session.commit()
+    await session.refresh(kit)
+    await session.refresh(kit, attribute_names=["items"])
+
+    return KitRead.model_validate(kit)
 
 
 @router.post("/{kit_id}/items", response_model=KitItemRead, status_code=201)

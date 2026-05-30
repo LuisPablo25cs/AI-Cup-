@@ -93,6 +93,15 @@ def upload_model(
 
     return BUCKET_NAME, key
 
+def upload_kit_image(file_bytes: bytes, key: str, content_type: str) -> None:
+    s3_client.put_object(
+        Bucket=BUCKET_NAME,
+        Key=key,
+        Body=file_bytes,
+        ContentType=content_type
+    )
+
+
 # Download
 
 def download_file(bucket: str, key: str, local_path: str) -> None:
