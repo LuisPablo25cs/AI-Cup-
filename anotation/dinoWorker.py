@@ -128,51 +128,64 @@ def onAnnotationJob(ch, method, properties, body):
         "task_id":    taskId,
         "frame":      frame
     }))
-    res = annotateImage(imagePath, prompt, classId, taskId, frame)
-    if res:
-        # 1. Update the unbagged frame as ready for validation
-        r.setex(metaKey, 864000, json.dumps({
-            "local_path":  imagePath,
-            "txt_path":    res["txt_path"],
-            "visual_path": res["visual_path"],
-            "status":      "pending_validation",
-            "variante":    variante,
-            "task_id":     taskId,
-            "frame":       frame
-        }))
-        ch.basic_publish(
-            exchange="",
-            routing_key="to-validate-imgs-queue",
-            body=json.dumps({"task_id": taskId, "frame": frame})
-        )
-        # 2. Propagate the label to all bagged twins awaiting this frame
-        twin_keys = list(r.scan_iter(f"staging:{taskId}:con_bolsa_*_{frame}"))
-        for twin_key in twin_keys:
-            twin_raw = r.get(twin_key)
-            if not twin_raw:
-                continue
-            twin_data = json.loads(twin_raw)
-            if twin_data.get("status") != "awaiting_twin_label":
-                continue
-            # Copy the .txt label file to the bagged frame's directory
-            twin_img_path = Path(twin_data["local_path"])
-            twin_txt_path = twin_img_path.with_suffix(".txt")
-            shutil.copy2(res["txt_path"], str(twin_txt_path))
-            # Update the bagged twin's status to pending_validation
-            twin_data["txt_path"] = str(twin_txt_path)
-            twin_data["status"]   = "pending_validation"
-            r.setex(twin_key, 864000, json.dumps(twin_data))
-            variante = twin_data.get("variante", "unknown")
-            print(f"--> [Twin] Propagated label to {variante}/{frame}", flush=True)
-    else:
+    try:
+        res = annotateImage(imagePath, prompt, classId, taskId, frame)
+        if res:
+            # 1. Update the unbagged frame as ready for validation
+            r.setex(metaKey, 864000, json.dumps({
+                "local_path":  imagePath,
+                "txt_path":    res["txt_path"],
+                "visual_path": res["visual_path"],
+                "status":      "pending_validation",
+                "variante":    variante,
+                "task_id":     taskId,
+                "frame":       frame
+            }))
+            ch.basic_publish(
+                exchange="",
+                routing_key="to-validate-imgs-queue",
+                body=json.dumps({"task_id": taskId, "frame": frame})
+            )
+            # 2. Propagate the label to all bagged twins awaiting this frame
+            twin_keys = list(r.scan_iter(f"staging:{taskId}:con_bolsa_*_{frame}"))
+            for twin_key in twin_keys:
+                twin_raw = r.get(twin_key)
+                if not twin_raw:
+                    continue
+                twin_data = json.loads(twin_raw)
+                if twin_data.get("status") != "awaiting_twin_label":
+                    continue
+                # Copy the .txt label file to the bagged frame's directory
+                twin_img_path = Path(twin_data["local_path"])
+                twin_txt_path = twin_img_path.with_suffix(".txt")
+                shutil.copy2(res["txt_path"], str(twin_txt_path))
+                # Update the bagged twin's status to pending_validation
+                twin_data["txt_path"] = str(twin_txt_path)
+                twin_data["status"]   = "pending_validation"
+                r.setex(twin_key, 864000, json.dumps(twin_data))
+                twin_var = twin_data.get("variante", "unknown")
+                print(f"--> [Twin] Propagated label to {twin_var}/{frame}", flush=True)
+        else:
+            r.setex(metaKey, 864000, json.dumps({
+                "local_path": imagePath,
+                "status":     "no_detection",
+                "variante":   "sin_bolsa",
+                "task_id":    taskId,
+                "frame":      frame
+            }))
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         r.setex(metaKey, 864000, json.dumps({
             "local_path": imagePath,
-            "status":     "no_detection",
-            "variante":   "sin_bolsa",
+            "status":     "failed",
+            "error":      str(e),
+            "variante":   variante,
             "task_id":    taskId,
             "frame":      frame
         }))
-    ch.basic_ack(delivery_tag=method.delivery_tag)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
 
 while True:
     try:
