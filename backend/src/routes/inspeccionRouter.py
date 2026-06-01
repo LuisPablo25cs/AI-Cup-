@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID
@@ -22,6 +23,7 @@ from src.services.s3 import BUCKET_NAME, s3_client
 
 
 router = APIRouter(prefix="/api/inspections", tags=["Inspections"])
+logger = logging.getLogger("backend.routes.inspections")
 
 
 class DeteccionRead(BaseModel):
@@ -459,6 +461,13 @@ async def create_inspection(
     ]
 
     # --- 8. Get or load cached YOLO model ---
+    logger.info(
+        "[INFERENCE REQUEST] kit_id=%s | vision_model_id=%s | s3_key=%s | estado=%s",
+        kit_id,
+        vision_model.id_model,
+        vision_model.key_s3_weights,
+        vision_model.estado,
+    )
     try:
         model = await get_or_load_model(
             vision_model.id_model, vision_model.key_s3_weights
