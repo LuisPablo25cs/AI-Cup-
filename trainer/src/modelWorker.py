@@ -18,11 +18,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 
 class TrainerWorker:
     def __init__(self):
-        self.db = DBClient()
+        # Note: DBClient is NOT stored here. A fresh DBClient is created per job
+        # in process_job() because asyncio.run() creates a new event loop each time,
+        # and asyncpg connections cannot be shared across event loops.
         self.s3 = S3Client()
         self.factory = ModelFactory()
 
-    async def _async_pipeline(self, job: dict, tracker: ExperimentTracker) -> None:
+    async def _async_pipeline(self, job: dict, tracker: ExperimentTracker, db: "DBClient") -> None:
         model_id_str = job["model_id"]
         model_id = UUID(model_id_str)
         model_name = job["nombre"]
@@ -47,7 +49,7 @@ class TrainerWorker:
 
         # Step 1: Set database state to PREPARING_DATA
         logger.info(f"Model {model_id_str}: Updating database status to PREPARING_DATA")
-        await self.db.update_model_status(model_id, "PREPARING_DATA")
+        await db.update_model_status(model_id, "PREPARING_DATA")
 
         # Step 2: Build dataset
         logger.info(f"Model {model_id_str}: Assembling and remapping datasets on local disk")
@@ -58,8 +60,8 @@ class TrainerWorker:
             piece_uuid = UUID(p_cfg["id_pieza"])
             class_index = p_cfg["class_index"]
             
-            piece_name = await self.db.get_piece_name(piece_uuid)
-            samples = await self.db.get_training_samples(piece_uuid)
+            piece_name = await db.get_piece_name(piece_uuid)
+            samples = await db.get_training_samples(piece_uuid)
             
             piece_names.append(piece_name)
             logger.info(f"Piece: '{piece_name}' ({piece_uuid}) has {len(samples)} annotated samples.")
@@ -78,7 +80,7 @@ class TrainerWorker:
 
         # Step 3: Set database state to TRAINING
         logger.info(f"Model {model_id_str}: Dataset built successfully. Updating database status to TRAINING.")
-        await self.db.update_model_status(model_id, "TRAINING")
+        await db.update_model_status(model_id, "TRAINING")
 
         try:
             # Step 4: Run training
@@ -92,7 +94,7 @@ class TrainerWorker:
             self.s3.upload_file(result.best_weights, s3_weights_key)
 
             # Step 6: Mark database status as COMPLETED
-            await self.db.update_model_status(model_id, "COMPLETED", s3_weights_key)
+            await db.update_model_status(model_id, "COMPLETED", s3_weights_key)
             logger.info(f"Model {model_id_str}: Status updated to COMPLETED.")
 
         finally:
@@ -101,20 +103,29 @@ class TrainerWorker:
             dataset.cleanup()
 
     def process_job(self, job: dict) -> None:
-        """Runs the async pipeline from a synchronous consumer frame."""
+        """Runs the async pipeline from a synchronous consumer frame.
+        
+        A fresh DBClient is created for each job so that the SQLAlchemy async
+        engine (and its underlying asyncpg connections) are fully contained
+        within a single asyncio.run() event loop. Re-using an engine across
+        multiple asyncio.run() calls causes asyncpg's InterfaceError because
+        connections are bound to the event loop they were created in.
+        """
         tracker = ExperimentTracker()
+        db = DBClient()  # Fresh engine per job — must not be shared across asyncio.run() calls
         try:
-            asyncio.run(self._async_pipeline(job, tracker))
+            asyncio.run(self._async_pipeline(job, tracker, db))
             tracker.end_experiment()
         except Exception as e:
             logger.error(f"Pipeline error occurred during training model {job.get('model_id')}: {e}", exc_info=True)
             tracker.log_failure(e)
             tracker.end_experiment()
             
-            # Safely attempt database correction to FAILED state
+            # Safely attempt database correction to FAILED state using a fresh client
             try:
                 model_uuid = UUID(job["model_id"])
-                asyncio.run(self.db.update_model_status(model_uuid, "FAILED"))
+                fail_db = DBClient()
+                asyncio.run(fail_db.update_model_status(model_uuid, "FAILED"))
             except Exception as db_err:
                 logger.error(f"Could not update model state to FAILED in database: {db_err}")
 

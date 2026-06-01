@@ -1,6 +1,7 @@
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlalchemy import select
 from uuid import UUID
 from dataclasses import dataclass
@@ -19,12 +20,16 @@ class TrainingSample:
 
 class DBClient:
     def __init__(self):
+        # NullPool is required here because this engine is used inside asyncio.run(),
+        # which creates and destroys a new event loop per job. Connection pooling
+        # binds asyncpg sockets to a specific event loop; reusing them in a new loop
+        # causes InterfaceError ("another operation is in progress"). NullPool ensures
+        # every DB operation opens and closes a fresh connection, fully avoiding this.
         self.engine = create_async_engine(
             config.ASYNC_DATABASE_URL,
             echo=False,
             future=True,
-            pool_size=10,
-            max_overflow=20
+            poolclass=NullPool,
         )
         self.async_session_maker = sessionmaker(
             self.engine, class_=AsyncSession, expire_on_commit=False
