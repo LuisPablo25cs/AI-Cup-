@@ -32,6 +32,14 @@ class AdminKeySanitizer(logging.Filter):
 # Apply sanitizer to root logger so all loggers are covered.
 logging.getLogger().addFilter(AdminKeySanitizer())
 
+# Configure root logger — without this, INFO messages from backend.* loggers
+# are silently dropped because the default root level is WARNING and there are
+# no handlers. Format matches uvicorn's default for a consistent log stream.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
 Path("/app/data").mkdir(exist_ok=True)
 
 
