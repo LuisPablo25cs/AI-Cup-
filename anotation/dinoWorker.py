@@ -109,6 +109,9 @@ def onAnnotationJob(ch, method, properties, body):
     taskId    = job["taskId"]
     frame     = job["frame"]
     imagePath = job["path"]
+    # variante is optional in the message — synthetic Blender jobs omit it (defaults
+    # to sin_bolsa); real-image upload jobs pass it explicitly per batch.
+    variante  = job.get("variante", "sin_bolsa")
     promptRaw = r.get(f"prompt:{taskId}")
     classRaw  = r.get(f"class_id:{taskId}")
     if not promptRaw:
@@ -117,11 +120,11 @@ def onAnnotationJob(ch, method, properties, body):
         return
     prompt  = promptRaw.decode()
     classId = classRaw.decode() if classRaw else "0"
-    metaKey = f"staging:{taskId}:sin_bolsa_{frame}"
+    metaKey = f"staging:{taskId}:{variante}_{frame}"
     r.setex(metaKey, 864000, json.dumps({
         "local_path": imagePath,
         "status":     "annotating",
-        "variante":   "sin_bolsa",
+        "variante":   variante,
         "task_id":    taskId,
         "frame":      frame
     }))
@@ -133,7 +136,7 @@ def onAnnotationJob(ch, method, properties, body):
             "txt_path":    res["txt_path"],
             "visual_path": res["visual_path"],
             "status":      "pending_validation",
-            "variante":    "sin_bolsa",
+            "variante":    variante,
             "task_id":     taskId,
             "frame":       frame
         }))

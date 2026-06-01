@@ -3,7 +3,7 @@ import uuid
 import json
 import os
 import shutil
-from typing import List
+from typing import List, Optional
 
 from src.db import AsyncSessionLocal
 from src.models.pieza import Pieza
@@ -18,9 +18,63 @@ class ImageConfirmation(BaseModel):
     frame: str
     status: str
 
+class LabelPatch(BaseModel):
+    """Polygon edit payload from the mask canvas editor.
+    
+    `polygons` is a list of contours (one per detected object).  
+    Each contour is a flat list of [x, y] pairs with values in [0, 1] (normalized).  
+    `class_id` defaults to 0 for single-class use cases.
+    """
+    polygons: List[List[List[float]]]  # [contour][[x, y], ...]
+    class_id: int = 0
+
 router = APIRouter(tags=["Tasks"])
 
+
+@router.patch("/tasks/{taskId}/frame/{frame}/label")
+async def patch_frame_label(taskId: str, frame: str, body: LabelPatch):
+    """Overwrite the YOLO segmentation label for a staging frame.
+
+    Called by the frontend mask editor when the operator saves polygon edits.
+    The frame must exist in Redis with status 'pending_validation'; its .txt
+    file is overwritten and the staging entry is updated with 'edited: true'.
+    """
+    # Resolve Redis staging key
+    pattern = f"staging:{taskId}:*_{frame}"
+    matches = list(r.scan_iter(pattern))
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"Frame '{frame}' not found in staging for task {taskId}")
+
+    key = matches[0].decode("utf-8")
+    raw = r.get(key)
+    if not raw:
+        raise HTTPException(status_code=404, detail="Staging metadata expired or missing")
+
+    data = json.loads(raw)
+    txt_path = data.get("txt_path")
+    if not txt_path:
+        raise HTTPException(status_code=409, detail="No label file exists for this frame yet (SAM has not produced a result)")
+
+    # Write updated YOLO segmentation .txt
+    lines = []
+    for contour in body.polygons:
+        if len(contour) < 3:
+            continue
+        coords = " ".join(f"{pt[0]:.6f} {pt[1]:.6f}" for pt in contour)
+        lines.append(f"{body.class_id} {coords}\n")
+
+    with open(txt_path, "w") as f:
+        f.writelines(lines)
+
+    # Mark as edited in Redis (keeps pending_validation so operator still A/D's it)
+    data["edited"] = True
+    r.setex(key, 864000, json.dumps(data))
+
+    return {"task_id": taskId, "frame": frame, "edited": True, "polygons_saved": len(lines)}
+
+
 @router.get("/tasks")
+
 async def get_all_tasks():
     # 1. Scan for all keys matching status:*
     keys = list(r.scan_iter("status:*"))
@@ -254,6 +308,9 @@ async def confirm(taskID: str, imgStatus: List[ImageConfirmation]):
                     render_set = RenderSet(
                         id_pieza=pieza_id,
                         frame_name=img.frame,
+                        # Real image frames are named real_{i}; synthetic frames use
+                        # Blender composite names (e.g. azul_oscuro_brillante_alto_atras).
+                        source="real" if img.frame.startswith("real_") else "synthetic",
                     )
                     db_session.add(render_set)
                     await db_session.flush()

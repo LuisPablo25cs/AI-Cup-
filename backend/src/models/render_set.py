@@ -27,6 +27,10 @@ class RenderSet(SQLModel, table=True):
     # Full composite name from renderScene.py: fondo_perfil_vista or hdri_name_vista
     frame_name: str
 
+    # Origin of this render set: "synthetic" (Blender render) or "real" (uploaded photo).
+    # Defaults to "synthetic" so all existing rows are unaffected.
+    source: str = Field(default="synthetic")
+
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     )
@@ -35,3 +39,4 @@ class RenderSet(SQLModel, table=True):
     pieza: "Pieza" = Relationship(back_populates="render_sets")
     label: Optional["Label"] = Relationship(back_populates="render_set")
     imagenes: list["Imagen"] = Relationship(back_populates="render_set")
+
