@@ -1,16 +1,22 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field as PydField
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from pydantic import BaseModel, Field as PydField, model_validator
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from uuid import UUID
 from datetime import datetime
 
 from src.db import get_session
+from src.dependencies.admin_key import require_admin_key
 from src.models.kit import Kit, KitPiezaLink
+from src.models.inspeccion import Inspeccion
 from src.models.pieza import Pieza
 from src.models.vision_model import VisionModel
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/kits", tags=["Kits"])
@@ -86,6 +92,13 @@ class KitRead(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @model_validator(mode='after')
+    def resolve_imagen_url(self) -> 'KitRead':
+        if self.imagen_url and not self.imagen_url.startswith('http'):
+            from src.services.s3 import get_object_read_url, BUCKET_NAME
+            self.imagen_url = get_object_read_url(BUCKET_NAME, self.imagen_url)
+        return self
+
 
 @router.post("/", response_model=KitRead, status_code=201)
 async def create_kit(
@@ -156,12 +169,82 @@ async def update_kit(
 async def delete_kit(
     kit_id: UUID,
     session: AsyncSession = Depends(get_session),
+    _admin: str = Depends(require_admin_key),
 ):
+    from src.services.s3 import delete_object, BUCKET_NAME
+
     kit = await session.get(Kit, kit_id)
     if not kit:
         raise HTTPException(status_code=404, detail="Kit not found")
+
+    s3_key = kit.imagen_url  # capture before delete
+
+    # Null out Inspeccion.kit_id for all inspections linked to this kit.
+    # Preserves audit trail via kit_nombre snapshot.
+    insp_result = await session.exec(
+        select(Inspeccion).where(Inspeccion.kit_id == kit_id)
+    )
+    for insp in insp_result.all():
+        insp.kit_id = None
+        session.add(insp)
+
+    # KitPiezaLink rows cascade via "all, delete-orphan" on Kit.items
+    # and ondelete="CASCADE" FK. Explicit delete is safe.
+    link_result = await session.exec(
+        select(KitPiezaLink).where(KitPiezaLink.kit_id == kit_id)
+    )
+    for link in link_result.all():
+        await session.delete(link)
+
     await session.delete(kit)
     await session.commit()
+
+    # S3 cleanup AFTER commit (best-effort — never roll back a valid DB tx)
+    if s3_key:
+        try:
+            delete_object(BUCKET_NAME, s3_key)
+        except Exception:
+            logger.warning(
+                "Failed to delete S3 cover for kit %s: %s", kit_id, s3_key
+            )
+
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_IMAGE_SIZE = 5 * 1024 * 1024
+
+
+@router.post("/{kit_id}/image", response_model=KitRead)
+async def upload_kit_image(
+    kit_id: UUID,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+):
+    from src.services.s3 import upload_kit_image as s3_upload_kit_image
+
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_IMAGE_TYPES)}",
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail="File exceeds the 5 MB size limit")
+
+    kit = await session.get(Kit, kit_id)
+    if not kit:
+        raise HTTPException(status_code=404, detail="Kit not found")
+
+    s3_key = f"kits/{kit_id}/cover.jpg"
+    s3_upload_kit_image(file_bytes, s3_key, file.content_type)
+
+    kit.imagen_url = s3_key
+    session.add(kit)
+    await session.commit()
+    await session.refresh(kit)
+    await session.refresh(kit, attribute_names=["items"])
+
+    return KitRead.model_validate(kit)
 
 
 @router.post("/{kit_id}/items", response_model=KitItemRead, status_code=201)

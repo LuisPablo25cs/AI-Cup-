@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime
 import os
@@ -6,15 +6,19 @@ import aio_pika
 import json
 import uuid
 import io
+import logging
 from PIL import Image
 from sqlmodel import select
 from sqlalchemy import func
 
 from src.db import AsyncSessionLocal
+from src.dependencies.admin_key import require_admin_key
 from src.models.pieza import Pieza
 from src.models.kit import Kit, KitPiezaLink
 from src.models.vision_model import VisionModel, ModelPiezaLink
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 class GenerateModelRequest(BaseModel):
     nombre: str
@@ -207,3 +211,47 @@ async def find_objects(file: UploadFile = File(...)):
     # res = inferir(PATH_MODELO, image)
     # print(res)
     return {"message": "Inference template endpoint"}
+
+
+@router.delete("/models/{model_id}", status_code=204)
+async def delete_model(
+    model_id: uuid.UUID,
+    _admin: str = Depends(require_admin_key),
+):
+    """Delete a VisionModel with cascade null-out and S3 weights cleanup."""
+    from src.services.s3 import delete_object, BUCKET_NAME
+
+    async with AsyncSessionLocal() as session:
+        model = await session.get(VisionModel, model_id)
+        if not model:
+            raise HTTPException(status_code=404, detail="Model not found")
+
+        s3_key = model.key_s3_weights  # capture before delete
+
+        # Null out Kit.vision_model_id for linked kits
+        kit_result = await session.exec(
+            select(Kit).where(Kit.vision_model_id == model_id)
+        )
+        for kit in kit_result.all():
+            kit.vision_model_id = None
+            session.add(kit)
+
+        # Delete ModelPiezaLink rows
+        link_result = await session.exec(
+            select(ModelPiezaLink).where(ModelPiezaLink.id_model == model_id)
+        )
+        for link in link_result.all():
+            await session.delete(link)
+
+        # Delete model
+        await session.delete(model)
+        await session.commit()
+
+    # S3 cleanup AFTER commit (best-effort)
+    if s3_key:
+        try:
+            delete_object(BUCKET_NAME, s3_key)
+        except Exception:
+            logger.warning(
+                "Failed to delete S3 weights for model %s: %s", model_id, s3_key
+            )

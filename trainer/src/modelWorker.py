@@ -102,6 +102,13 @@ class TrainerWorker:
             logger.info(f"Model {model_id_str}: Cleaning up dataset cache directory.")
             dataset.cleanup()
 
+    async def _update_failed_status(self, model_id: UUID) -> None:
+        """Update model status to FAILED. Called within the same event loop."""
+        try:
+            await self.db.update_model_status(model_id, "FAILED")
+        except Exception as db_err:
+            logger.error(f"Could not update model state to FAILED in database: {db_err}")
+
     def process_job(self, job: dict) -> None:
         """Runs the async pipeline from a synchronous consumer frame.
         
@@ -112,15 +119,22 @@ class TrainerWorker:
         connections are bound to the event loop they were created in.
         """
         tracker = ExperimentTracker()
+<<<<<<< HEAD
         db = DBClient()  # Fresh engine per job — must not be shared across asyncio.run() calls
+=======
+        model_id_str = job.get("model_id")
+        model_id = UUID(model_id_str) if model_id_str else None
+        
+>>>>>>> 517e301fa4ef951550b1809d476b8b884d833755
         try:
             asyncio.run(self._async_pipeline(job, tracker, db))
             tracker.end_experiment()
         except Exception as e:
-            logger.error(f"Pipeline error occurred during training model {job.get('model_id')}: {e}", exc_info=True)
+            logger.error(f"Pipeline error occurred during training model {model_id_str}: {e}", exc_info=True)
             tracker.log_failure(e)
             tracker.end_experiment()
             
+<<<<<<< HEAD
             # Safely attempt database correction to FAILED state using a fresh client
             try:
                 model_uuid = UUID(job["model_id"])
@@ -128,6 +142,19 @@ class TrainerWorker:
                 asyncio.run(fail_db.update_model_status(model_uuid, "FAILED"))
             except Exception as db_err:
                 logger.error(f"Could not update model state to FAILED in database: {db_err}")
+=======
+            # Update DB to FAILED inside a fresh event loop
+            if model_id:
+                try:
+                    asyncio.run(self._update_failed_status(model_id))
+                except RuntimeError:
+                    # If there's already a running loop, use a new one
+                    loop = asyncio.new_event_loop()
+                    try:
+                        loop.run_until_complete(self._update_failed_status(model_id))
+                    finally:
+                        loop.close()
+>>>>>>> 517e301fa4ef951550b1809d476b8b884d833755
 
     def start_consuming(self) -> None:
         """RabbitMQ continuous connection listener with automated connection recovery."""
@@ -150,16 +177,19 @@ class TrainerWorker:
                 logger.info(f"Queue '{config.RABBITMQ_QUEUE}' locked. Consumer active and listening...")
                 
                 def on_message(ch, method, properties, body):
+                    delivery_tag = method.delivery_tag
                     try:
                         logger.info("Acquired a new model training job.")
                         job = json.loads(body.decode("utf-8"))
                         self.process_job(job)
+                        # Only ACK if processing succeeded
+                        ch.basic_ack(delivery_tag=delivery_tag)
+                        logger.info("Message acknowledged after successful processing.")
                     except Exception as parse_err:
-                        logger.error(f"Unable to parse message payload: {parse_err}")
-                    finally:
-                        # Secure ACK boundary
-                        ch.basic_ack(delivery_tag=method.delivery_tag)
-                        logger.info("Message acknowledged.")
+                        logger.error(f"Unable to process message payload: {parse_err}")
+                        # NACK without requeue — prevents infinite retry loops on persistent failures
+                        ch.basic_nack(delivery_tag=delivery_tag, requeue=False)
+                        logger.info("Message rejected (nack) due to processing error.")
 
                 channel.basic_consume(
                     queue=config.RABBITMQ_QUEUE,

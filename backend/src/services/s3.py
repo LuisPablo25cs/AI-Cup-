@@ -1,5 +1,6 @@
 import boto3
 import os
+from pathlib import Path
 from uuid import UUID
 from botocore.config import Config
 from src.models.imagen import BagVariant
@@ -92,6 +93,23 @@ def upload_model(
 
     return BUCKET_NAME, key
 
+def upload_kit_image(file_bytes: bytes, key: str, content_type: str) -> None:
+    s3_client.put_object(
+        Bucket=BUCKET_NAME,
+        Key=key,
+        Body=file_bytes,
+        ContentType=content_type
+    )
+
+
+# Download
+
+def download_file(bucket: str, key: str, local_path: str) -> None:
+    """Download an S3 object to the local filesystem. Creates parent directories if needed."""
+    Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+    s3_client.download_file(bucket, key, local_path)
+
+
 #Other operations
 
 def get_object_read_url(bucket: str, key_s3: str, expiration: int = 3600) -> str:
@@ -108,3 +126,23 @@ def get_object_read_url(bucket: str, key_s3: str, expiration: int = 3600) -> str
 
 def delete_object(bucket: str, key_s3: str) -> None:
     s3_client.delete_object(Bucket=bucket, Key=key_s3)
+
+
+def delete_prefix(bucket: str, prefix: str) -> int:
+    """Delete all objects under a prefix. Returns count deleted.
+
+    Uses list_objects_v2 paginator + delete_objects for batch deletion.
+    Safe for prefixes with more than 1000 objects — paginator handles it.
+    """
+    paginator = s3_client.get_paginator("list_objects_v2")
+    deleted = 0
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        objects = page.get("Contents", [])
+        if not objects:
+            continue
+        s3_client.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": o["Key"]} for o in objects]},
+        )
+        deleted += len(objects)
+    return deleted

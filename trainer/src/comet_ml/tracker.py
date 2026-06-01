@@ -85,7 +85,11 @@ class ExperimentTracker:
         if self.experiment:
             self.experiment.log_other("status", "FAILED")
             self.experiment.log_other("error", str(error))
-            self.experiment.log_text(tb, filename="error_traceback.txt")
+            try:
+                self.experiment.log_text(tb, file_name="error_traceback.txt")
+            except TypeError:
+                # Fallback for Comet API versions that don't accept file_name
+                self.experiment.log_text(tb)
         else:
             logger.error("=== Experiment Execution Failure ===")
             logger.error(f"Error: {error}")
